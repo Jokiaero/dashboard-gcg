@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
+    "build:vercel": "prisma generate && prisma db push && next build",
     "start": "next start",
     "lint": "eslint",
+    "postinstall": "prisma generate",
     "seed": "node prisma/seed.js",
     "import:excel": "node scripts/import-laporan-excel.js",
     "import:risk": "node scripts/import-profil-risiko-excel.js",
