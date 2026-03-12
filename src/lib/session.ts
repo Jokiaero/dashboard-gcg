@@ -8,11 +8,8 @@ export interface SessionData {
     };
 }
 
-const FALLBACK_SESSION_SECRET = "change-this-session-secret-in-production-123456";
-const sessionPassword = process.env.SESSION_SECRET || FALLBACK_SESSION_SECRET;
-
 export const sessionOptions: SessionOptions = {
-    password: sessionPassword,
+    password: process.env.SESSION_SECRET as string,
     cookieName: "gcg_session",
     cookieOptions: {
         secure: process.env.NODE_ENV === "production",
