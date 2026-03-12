@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getIronSession } from "iron-session";
-import { sessionOptions, SessionData } from "@/lib/session";
 
 const PUBLIC_PATHS = ["/login", "/register", "/api/auth/login", "/api/auth/register"];
 
@@ -11,9 +9,9 @@ export async function proxy(req: NextRequest) {
         return NextResponse.next();
     }
 
-    const session = await getIronSession<SessionData>(req.cookies as any, sessionOptions);
-
-    if (!session.user) {
+    // Avoid using iron-session in middleware runtime; check session cookie presence only.
+    const sessionCookie = req.cookies.get("gcg_session")?.value;
+    if (!sessionCookie) {
         return NextResponse.redirect(new URL("/login", req.url));
     }
 
