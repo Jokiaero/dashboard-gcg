@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 type DashboardSettingsResponse = {
@@ -41,7 +41,7 @@ export default function SettingsForm() {
 
     const canEditDashboard = userSession?.role === "SUPERADMIN" || userSession?.role === "STAFF";
 
-    useQuery<DashboardSettingsResponse>({
+    const { data: dashboardSettings } = useQuery<DashboardSettingsResponse>({
         queryKey: ["dashboardSettings"],
         queryFn: async () => {
             const res = await fetch("/api/dashboard/settings");
@@ -50,21 +50,27 @@ export default function SettingsForm() {
         },
         enabled: canEditDashboard,
         staleTime: 30000,
-        onSuccess: (data) => {
-            setDashboardTitle(data.dashboardTitle || "");
-            setDashboardSubtitle(data.dashboardSubtitle || "");
-            setKajian2025(data.kajian2025 || "");
-            setKajian2024(data.kajian2024 || "");
-            setIsoNote(data.isoNote || "");
-            setPenghargaanNote(data.penghargaanNote || "");
-            const normalizedRows = (data.gcgScores || []).map((row) => ({
-                year: String(row.year ?? ""),
-                value: String(row.value ?? ""),
-            }));
-
-            setGcgScoreRows(normalizedRows.length > 0 ? normalizedRows : [{ year: "", value: "" }]);
-        },
     });
+
+    useEffect(() => {
+        if (!dashboardSettings) {
+            return;
+        }
+
+        setDashboardTitle(dashboardSettings.dashboardTitle || "");
+        setDashboardSubtitle(dashboardSettings.dashboardSubtitle || "");
+        setKajian2025(dashboardSettings.kajian2025 || "");
+        setKajian2024(dashboardSettings.kajian2024 || "");
+        setIsoNote(dashboardSettings.isoNote || "");
+        setPenghargaanNote(dashboardSettings.penghargaanNote || "");
+
+        const normalizedRows = (dashboardSettings.gcgScores || []).map((row) => ({
+            year: String(row.year ?? ""),
+            value: String(row.value ?? ""),
+        }));
+
+        setGcgScoreRows(normalizedRows.length > 0 ? normalizedRows : [{ year: "", value: "" }]);
+    }, [dashboardSettings]);
 
     const passwordMutation = useMutation({
         mutationFn: async () => {
