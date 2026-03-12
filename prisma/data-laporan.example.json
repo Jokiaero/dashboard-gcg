@@ -1,0 +1,18 @@
+[
+  {
+    "tahun": "2026",
+    "pers_no": "P001",
+    "nik": "3171234567890001",
+    "nama": "Nama Karyawan",
+    "jabatan": "Manager",
+    "ou": "OU-1",
+    "status_approved": "APPROVED",
+    "site": "Jakarta",
+    "approved_by": "Admin",
+    "approved_date": "2026-03-01T10:00:00.000Z",
+    "department": "GCG",
+    "divisi": "Compliance",
+    "direktorat": "Corporate",
+    "work_contract": "PKWTT"
+  }
+]

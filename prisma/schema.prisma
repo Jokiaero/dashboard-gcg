@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model DataLaporan {
+  id               Int       @id @default(autoincrement())
+  tahun            String?
+  pers_no          String?
+  nik              String?
+  nama             String?
+  jabatan          String?
+  ou               String?
+  file             String?
+  status_approved  String?
+  site             String?
+  approved_by      String?
+  approved_date    DateTime?
+  updated_by       String?
+  updated_date     DateTime?
+  generated_by     String?
+  generated_date   DateTime?
+  sign_loc         String?
+  kode_jabatan     String?
+  jabatan_lengkap  String?
+  dept_id          String?
+  department       String?
+  div_id           String?
+  divisi           String?
+  direktorat_id    String?
+  direktorat       String?
+  work_contract_id String?
+  work_contract    String?
+  createdAt        DateTime  @default(now())
+
+  @@map("data_laporan")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  role      String   @default("GUEST") // SUPERADMIN, STAFF, AUDITOR, GUEST
+  createdAt DateTime @default(now())
+
+  @@map("users")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  action    String   // e.g. "CREATE_LAPORAN"
+  username  String   // who did it
+  details   String?  // e.g. "Added laporan WBS Kiln"
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
