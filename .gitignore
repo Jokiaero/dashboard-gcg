@@ -48,3 +48,6 @@ next-env.d.ts
 
 # local editor settings
 .vscode/
+
+# local binaries/tools
+tools/
