@@ -4,6 +4,7 @@ import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { sessionOptions, SessionData } from "@/lib/session";
 import { logAudit } from "@/lib/auditLogger";
+import { isBasicUserRole } from "@/lib/roles";
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     if (!session.user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    if (session.user.role === "AUDITOR" || session.user.role === "GUEST") {
+    if (isBasicUserRole(session.user.role)) {
         return NextResponse.json({ error: "Terlarang. Anda tidak memiliki akses untuk menambah data." }, { status: 403 });
     }
 

@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "node prisma/seed.js",
+    "create:vip": "node create_vip.mjs",
+    "sync:mysql:to:pg": "node scripts/sync-mysql-to-postgres.js",
     "import:excel": "node scripts/import-laporan-excel.js",
     "import:risk": "node scripts/import-profil-risiko-excel.js",
     "import:wbs": "node scripts/import-wbs-excel.js"
@@ -24,6 +26,7 @@
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.577.0",
+    "mysql2": "^3.20.0",
     "next": "16.1.6",
     "prisma": "5.22.0",
     "radix-ui": "^1.4.3",

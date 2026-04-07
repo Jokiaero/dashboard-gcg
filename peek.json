@@ -1,0 +1,44 @@
+{
+  "pelaporan_penyuapan": {
+    "headers": [
+      "Tahun",
+      "Rata-rata Waktu (Hari)"
+    ],
+    "row1": [
+      2021,
+      25
+    ],
+    "row2": [
+      2022,
+      20
+    ]
+  },
+  "pelaporan_ppg": {
+    "headers": [
+      "Kategori",
+      "Persentase (%)"
+    ],
+    "row1": [
+      "Selesai Ditindaklanjuti",
+      0.85
+    ],
+    "row2": [
+      "Dalam Proses",
+      0.1
+    ]
+  },
+  "pelaporan_survey": {
+    "headers": [
+      "Jenis Pengaduan",
+      "Jumlah Laporan"
+    ],
+    "row1": [
+      "Pelayanan Publik",
+      45
+    ],
+    "row2": [
+      "Integritas Pegawai",
+      12
+    ]
+  }
+}

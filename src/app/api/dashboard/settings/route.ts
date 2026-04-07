@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { sessionOptions, SessionData } from "@/lib/session";
+import { REGULASI_DEFAULT_ORDER_FILE_NAMES, REGULASI_DOCS_BY_SLUG, getRegulasiFileNameBySlug } from "@/lib/regulasiDocuments";
+import { SOFTSTRUCTURE_DEFAULT_ORDER_FILE_NAMES } from "@/lib/softstructureDocuments";
+import { KAJIAN_DEFAULT_ORDER_FILE_NAMES } from "@/lib/kajianDocuments";
+import { isVipRole } from "@/lib/roles";
 
 type GcgScore = {
   year: string;
@@ -10,14 +14,23 @@ type GcgScore = {
 };
 
 type DashboardSettingsRecord = {
-  dashboard_title: string;
-  dashboard_subtitle: string;
-  kajian_2025: string;
-  kajian_2024: string;
-  iso_note: string;
-  penghargaan_note: string;
-  gcg_scores_json: string;
+  dashboardTitle: string;
+  dashboardSubtitle: string;
+  kajian2025: string;
+  kajian2024: string;
+  isoNote: string;
+  penghargaanNote: string;
+  penghargaanUrl: string | null;
+  regulasiOrder: string | null;
+  softstructureOrder: string | null;
+  kajianOrder: string | null;
+  gcgScoresJson: string;
 };
+
+const DEFAULT_REGULASI_ORDER = [...REGULASI_DEFAULT_ORDER_FILE_NAMES];
+const DEFAULT_SOFTSTRUCTURE_ORDER = [...SOFTSTRUCTURE_DEFAULT_ORDER_FILE_NAMES];
+const DEFAULT_KAJIAN_ORDER = [...KAJIAN_DEFAULT_ORDER_FILE_NAMES];
+const LEGACY_REGULASI_SLUG_SET = new Set(Object.keys(REGULASI_DOCS_BY_SLUG));
 
 const DEFAULT_GCG_SCORES: GcgScore[] = [
   { year: "2020", value: 92.47 },
@@ -28,45 +41,168 @@ const DEFAULT_GCG_SCORES: GcgScore[] = [
 ];
 
 const DEFAULT_SETTINGS: DashboardSettingsRecord = {
-  dashboard_title: "Improvement Dashboard GCG",
-  dashboard_subtitle: "Meningkatkan Efektivitas dan Efisiensi Pengawasan GCG",
-  kajian_2025: "100%",
-  kajian_2024: "98%",
-  iso_note: "Sertifikat SMAP tersedia dan dapat diakses langsung.",
-  penghargaan_note: "Data penghargaan belum tersedia.",
-  gcg_scores_json: JSON.stringify(DEFAULT_GCG_SCORES),
+  dashboardTitle: "DASHBOARD GCG",
+  dashboardSubtitle: "Meningkatkan Efektivitas dan Efisiensi Pengawasan GCG",
+  kajian2025: "100%",
+  kajian2024: "98%",
+  isoNote: "Sertifikasi SNI ISO 37001:2016 tersedia dan dapat diakses langsung.",
+  penghargaanNote: "The Most Committed GRC Leader 2025 untuk Direktur Utama SMBR.\nTOP GRC Awards 2025 #4Stars untuk kategori Perusahaan.\nPenghargaan lainnya di tahun sebelumnya.",
+  penghargaanUrl: "https://semenbaturaja.co.id/komitmen-grc-berbuah-manis-semen-baturaja-kembali-dianugerahi-top-grc-awards-2025/",
+  regulasiOrder: JSON.stringify(DEFAULT_REGULASI_ORDER),
+  softstructureOrder: JSON.stringify(DEFAULT_SOFTSTRUCTURE_ORDER),
+  kajianOrder: JSON.stringify(DEFAULT_KAJIAN_ORDER),
+  gcgScoresJson: JSON.stringify(DEFAULT_GCG_SCORES),
 };
 
-async function ensureDashboardSettingsTable() {
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS dashboard_settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      dashboard_title TEXT NOT NULL,
-      dashboard_subtitle TEXT NOT NULL,
-      kajian_2025 TEXT NOT NULL,
-      kajian_2024 TEXT NOT NULL,
-      iso_note TEXT NOT NULL,
-      penghargaan_note TEXT NOT NULL,
-      gcg_scores_json TEXT NOT NULL,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+const LEGACY_ISO_NOTE = "Sertifikat SMAP tersedia dan dapat diakses langsung.";
+const LEGACY_PENGHARGAAN_NOTE = "Data penghargaan belum tersedia.";
 
-  await prisma.$executeRawUnsafe(
-    `
-    INSERT OR IGNORE INTO dashboard_settings
-      (id, dashboard_title, dashboard_subtitle, kajian_2025, kajian_2024, iso_note, penghargaan_note, gcg_scores_json)
-    VALUES
-      (1, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    DEFAULT_SETTINGS.dashboard_title,
-    DEFAULT_SETTINGS.dashboard_subtitle,
-    DEFAULT_SETTINGS.kajian_2025,
-    DEFAULT_SETTINGS.kajian_2024,
-    DEFAULT_SETTINGS.iso_note,
-    DEFAULT_SETTINGS.penghargaan_note,
-    DEFAULT_SETTINGS.gcg_scores_json
-  );
+function normalizeExternalUrl(rawValue: unknown): string {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) return "";
+
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function parsePenghargaanUrls(rawValue: unknown): string[] {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => {
+        const value = String(item ?? "").trim();
+        if (!value) return "";
+        return normalizeExternalUrl(value);
+      });
+    }
+  } catch {
+    // Backward compatibility: legacy plain single URL.
+  }
+
+  const legacyUrl = normalizeExternalUrl(raw);
+  return legacyUrl ? [legacyUrl] : [];
+}
+
+function serializePenghargaanUrls(urls: string[]): string {
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return "";
+  }
+  return JSON.stringify(urls.map((url) => String(url || "").trim()));
+}
+
+function normalizeRegulasiOrder(rawValue: unknown): string[] {
+  const rawList = Array.isArray(rawValue)
+    ? rawValue
+    : (() => {
+        try {
+          const parsed = JSON.parse(String(rawValue ?? ""));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  rawList.forEach((item) => {
+    const raw = String(item ?? "").trim();
+    if (!raw) {
+      return;
+    }
+
+    const fileName = LEGACY_REGULASI_SLUG_SET.has(raw)
+      ? (getRegulasiFileNameBySlug(raw) || raw)
+      : raw;
+
+    if (!fileName || seen.has(fileName)) {
+      return;
+    }
+
+    seen.add(fileName);
+    normalized.push(fileName);
+  });
+
+  return normalized.length > 0 ? normalized : [...DEFAULT_REGULASI_ORDER];
+}
+
+function serializeRegulasiOrder(order: string[]): string {
+  return JSON.stringify(order.map((slug) => String(slug || "").trim()).filter(Boolean));
+}
+
+function normalizeSoftstructureOrder(rawValue: unknown): string[] {
+  const rawList = Array.isArray(rawValue)
+    ? rawValue
+    : (() => {
+        try {
+          const parsed = JSON.parse(String(rawValue ?? ""));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  rawList.forEach((item) => {
+    const fileName = String(item ?? "").trim();
+    if (!fileName || seen.has(fileName)) {
+      return;
+    }
+
+    seen.add(fileName);
+    normalized.push(fileName);
+  });
+
+  return normalized.length > 0 ? normalized : [...DEFAULT_SOFTSTRUCTURE_ORDER];
+}
+
+function serializeSoftstructureOrder(order: string[]): string {
+  return JSON.stringify(order.map((fileName) => String(fileName || "").trim()).filter(Boolean));
+}
+
+function normalizeKajianOrder(rawValue: unknown): string[] {
+  const rawList = Array.isArray(rawValue)
+    ? rawValue
+    : (() => {
+        try {
+          const parsed = JSON.parse(String(rawValue ?? ""));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  rawList.forEach((item) => {
+    const fileName = String(item ?? "").trim();
+    if (!fileName || seen.has(fileName)) {
+      return;
+    }
+
+    seen.add(fileName);
+    normalized.push(fileName);
+  });
+
+  return normalized.length > 0 ? normalized : [...DEFAULT_KAJIAN_ORDER];
+}
+
+function serializeKajianOrder(order: string[]): string {
+  return JSON.stringify(order.map((fileName) => String(fileName || "").trim()).filter(Boolean));
 }
 
 function normalizeGcgScores(input: unknown): GcgScore[] {
@@ -81,7 +217,7 @@ function normalizeGcgScores(input: unknown): GcgScore[] {
       }
 
       const year = String((item as { year?: unknown }).year ?? "").trim();
-      const value = Number((item as { value?: unknown }).value ?? NaN);
+      const value = Number((item as { value?: unknown }).value ?? Number.NaN);
       if (!year || Number.isNaN(value)) {
         return null;
       }
@@ -93,28 +229,112 @@ function normalizeGcgScores(input: unknown): GcgScore[] {
   return rows.length > 0 ? rows : DEFAULT_GCG_SCORES;
 }
 
+async function ensureDashboardSettingsRow() {
+  await prisma.dashboardSettings.upsert({
+    where: { id: 1 },
+    update: {},
+    create: {
+      id: 1,
+      dashboardTitle: DEFAULT_SETTINGS.dashboardTitle,
+      dashboardSubtitle: DEFAULT_SETTINGS.dashboardSubtitle,
+      kajian2025: DEFAULT_SETTINGS.kajian2025,
+      kajian2024: DEFAULT_SETTINGS.kajian2024,
+      isoNote: DEFAULT_SETTINGS.isoNote,
+      penghargaanNote: DEFAULT_SETTINGS.penghargaanNote,
+      penghargaanUrl: DEFAULT_SETTINGS.penghargaanUrl,
+      regulasiOrder: DEFAULT_SETTINGS.regulasiOrder,
+      softstructureOrder: DEFAULT_SETTINGS.softstructureOrder,
+      kajianOrder: DEFAULT_SETTINGS.kajianOrder,
+      gcgScoresJson: DEFAULT_SETTINGS.gcgScoresJson,
+    },
+  });
+
+  const current = await prisma.dashboardSettings.findUnique({ where: { id: 1 } });
+  if (!current) {
+    return;
+  }
+
+  const patch: Partial<DashboardSettingsRecord> = {};
+
+  if (!current.isoNote || current.isoNote === LEGACY_ISO_NOTE) {
+    patch.isoNote = DEFAULT_SETTINGS.isoNote;
+  }
+
+  if (current.penghargaanNote === LEGACY_PENGHARGAAN_NOTE) {
+    patch.penghargaanNote = DEFAULT_SETTINGS.penghargaanNote;
+  }
+
+  if (!current.penghargaanUrl) {
+    patch.penghargaanUrl = DEFAULT_SETTINGS.penghargaanUrl;
+  }
+
+  if (!current.regulasiOrder) {
+    patch.regulasiOrder = DEFAULT_SETTINGS.regulasiOrder;
+  }
+
+  if (!current.softstructureOrder) {
+    patch.softstructureOrder = DEFAULT_SETTINGS.softstructureOrder;
+  }
+
+  if (!current.kajianOrder) {
+    patch.kajianOrder = DEFAULT_SETTINGS.kajianOrder;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await prisma.dashboardSettings.update({
+      where: { id: 1 },
+      data: patch,
+    });
+  }
+}
+
 async function getSettingsRow(): Promise<DashboardSettingsRecord> {
-  await ensureDashboardSettingsTable();
+  await ensureDashboardSettingsRow();
 
-  const rows = await prisma.$queryRawUnsafe<Array<DashboardSettingsRecord>>(
-    `SELECT dashboard_title, dashboard_subtitle, kajian_2025, kajian_2024, iso_note, penghargaan_note, gcg_scores_json FROM dashboard_settings WHERE id = 1`
-  );
+  const row = await prisma.dashboardSettings.findUnique({ where: { id: 1 } });
+  if (!row) {
+    return DEFAULT_SETTINGS;
+  }
 
-  return rows[0] || DEFAULT_SETTINGS;
+  return {
+    dashboardTitle: row.dashboardTitle,
+    dashboardSubtitle: row.dashboardSubtitle,
+    kajian2025: row.kajian2025,
+    kajian2024: row.kajian2024,
+    isoNote: row.isoNote,
+    penghargaanNote: row.penghargaanNote,
+    penghargaanUrl: row.penghargaanUrl,
+    regulasiOrder: row.regulasiOrder,
+    softstructureOrder: row.softstructureOrder,
+    kajianOrder: row.kajianOrder,
+    gcgScoresJson: row.gcgScoresJson,
+  };
 }
 
 export async function GET() {
   try {
     const row = await getSettingsRow();
-    const parsedScores = normalizeGcgScores(JSON.parse(row.gcg_scores_json));
+    const parsedScores = normalizeGcgScores(JSON.parse(row.gcgScoresJson));
+    const penghargaanUrls = parsePenghargaanUrls(row.penghargaanUrl);
+    const regulasiOrder = normalizeRegulasiOrder(row.regulasiOrder);
+    const softstructureOrder = normalizeSoftstructureOrder(row.softstructureOrder);
+    const kajianOrder = normalizeKajianOrder(row.kajianOrder);
+    const dashboardTitle = row.dashboardTitle === "Improvement Dashboard GCG"
+      ? "DASHBOARD GCG"
+      : row.dashboardTitle;
 
     return NextResponse.json({
-      dashboardTitle: row.dashboard_title,
-      dashboardSubtitle: row.dashboard_subtitle,
-      kajian2025: row.kajian_2025,
-      kajian2024: row.kajian_2024,
-      isoNote: row.iso_note,
-      penghargaanNote: row.penghargaan_note,
+      dashboardTitle,
+      dashboardSubtitle: row.dashboardSubtitle,
+      kajian2025: row.kajian2025,
+      kajian2024: row.kajian2024,
+      isoNote: row.isoNote,
+      penghargaanNote: row.penghargaanNote,
+      penghargaanUrl: penghargaanUrls.find((url) => Boolean(url)) || "",
+      penghargaanUrls,
+      regulasiOrder,
+      softstructureOrder,
+      kajianOrder,
       gcgScores: parsedScores,
     });
   } catch (error) {
@@ -130,42 +350,94 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (!["SUPERADMIN", "STAFF"].includes(session.user.role)) {
-      return NextResponse.json({ error: "Terlarang. Hanya Admin/Staff yang dapat mengubah dashboard." }, { status: 403 });
+    if (!isVipRole(session.user.role)) {
+      return NextResponse.json({ error: "Terlarang. Hanya Admin/VIP yang dapat mengubah dashboard." }, { status: 403 });
     }
 
     const body = await req.json();
 
-    const dashboardTitle = String(body.dashboardTitle ?? DEFAULT_SETTINGS.dashboard_title).trim() || DEFAULT_SETTINGS.dashboard_title;
-    const dashboardSubtitle = String(body.dashboardSubtitle ?? DEFAULT_SETTINGS.dashboard_subtitle).trim() || DEFAULT_SETTINGS.dashboard_subtitle;
-    const kajian2025 = String(body.kajian2025 ?? DEFAULT_SETTINGS.kajian_2025).trim() || DEFAULT_SETTINGS.kajian_2025;
-    const kajian2024 = String(body.kajian2024 ?? DEFAULT_SETTINGS.kajian_2024).trim() || DEFAULT_SETTINGS.kajian_2024;
-    const isoNote = String(body.isoNote ?? DEFAULT_SETTINGS.iso_note).trim() || DEFAULT_SETTINGS.iso_note;
-    const penghargaanNote = String(body.penghargaanNote ?? DEFAULT_SETTINGS.penghargaan_note).trim() || DEFAULT_SETTINGS.penghargaan_note;
+    const dashboardTitle = String(body.dashboardTitle ?? DEFAULT_SETTINGS.dashboardTitle).trim() || DEFAULT_SETTINGS.dashboardTitle;
+    const dashboardSubtitle = String(body.dashboardSubtitle ?? DEFAULT_SETTINGS.dashboardSubtitle).trim() || DEFAULT_SETTINGS.dashboardSubtitle;
+    const kajian2025 = String(body.kajian2025 ?? DEFAULT_SETTINGS.kajian2025).trim() || DEFAULT_SETTINGS.kajian2025;
+    const kajian2024 = String(body.kajian2024 ?? DEFAULT_SETTINGS.kajian2024).trim() || DEFAULT_SETTINGS.kajian2024;
+    const isoNote = String(body.isoNote ?? DEFAULT_SETTINGS.isoNote).trim() || DEFAULT_SETTINGS.isoNote;
+    const penghargaanNote = String(body.penghargaanNote ?? "").trim();
+    const rawPenghargaanUrlList: unknown[] = Array.isArray(body.penghargaanUrls)
+      ? body.penghargaanUrls
+      : [body.penghargaanUrl ?? ""];
+
+    const existingRow = await getSettingsRow();
+    const existingPenghargaanUrls = parsePenghargaanUrls(existingRow.penghargaanUrl);
+    const existingRegulasiOrder = normalizeRegulasiOrder(existingRow.regulasiOrder);
+    const existingSoftstructureOrder = normalizeSoftstructureOrder(existingRow.softstructureOrder);
+    const existingKajianOrder = normalizeKajianOrder(existingRow.kajianOrder);
+
+    let invalidPenghargaanUrlIndex = -1;
+
+    let penghargaanUrls = rawPenghargaanUrlList.map((rawValue, index) => {
+      const raw = String(rawValue ?? "").trim();
+      if (!raw) return "";
+
+      const normalized = normalizeExternalUrl(raw);
+      if (!normalized) {
+        invalidPenghargaanUrlIndex = index;
+        return "";
+      }
+      return normalized;
+    });
+
+    if (invalidPenghargaanUrlIndex >= 0) {
+      return NextResponse.json(
+        { error: `URL penghargaan ke-${invalidPenghargaanUrlIndex + 1} tidak valid` },
+        { status: 400 }
+      );
+    }
+
+    if (penghargaanUrls.length < existingPenghargaanUrls.length) {
+      const merged = [...penghargaanUrls];
+      for (let index = merged.length; index < existingPenghargaanUrls.length; index += 1) {
+        merged[index] = existingPenghargaanUrls[index] || "";
+      }
+      penghargaanUrls = merged;
+    }
+
+    while (penghargaanUrls.length > 0 && !penghargaanUrls[penghargaanUrls.length - 1]) {
+      penghargaanUrls.pop();
+    }
+
+    const regulasiOrder = body.regulasiOrder === undefined
+      ? existingRegulasiOrder
+      : normalizeRegulasiOrder(body.regulasiOrder);
+    const softstructureOrder = body.softstructureOrder === undefined
+      ? existingSoftstructureOrder
+      : normalizeSoftstructureOrder(body.softstructureOrder);
+    const kajianOrder = body.kajianOrder === undefined
+      ? existingKajianOrder
+      : normalizeKajianOrder(body.kajianOrder);
+
+    const serializedPenghargaanUrls = serializePenghargaanUrls(penghargaanUrls);
+    const serializedRegulasiOrder = serializeRegulasiOrder(regulasiOrder);
+    const serializedSoftstructureOrder = serializeSoftstructureOrder(softstructureOrder);
+    const serializedKajianOrder = serializeKajianOrder(kajianOrder);
     const gcgScores = normalizeGcgScores(body.gcgScores);
 
-    await ensureDashboardSettingsTable();
-    await prisma.$executeRawUnsafe(
-      `
-      UPDATE dashboard_settings
-      SET dashboard_title = ?,
-          dashboard_subtitle = ?,
-          kajian_2025 = ?,
-          kajian_2024 = ?,
-          iso_note = ?,
-          penghargaan_note = ?,
-          gcg_scores_json = ?,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = 1
-      `,
-      dashboardTitle,
-      dashboardSubtitle,
-      kajian2025,
-      kajian2024,
-      isoNote,
-      penghargaanNote,
-      JSON.stringify(gcgScores)
-    );
+    await ensureDashboardSettingsRow();
+    await prisma.dashboardSettings.update({
+      where: { id: 1 },
+      data: {
+        dashboardTitle,
+        dashboardSubtitle,
+        kajian2025,
+        kajian2024,
+        isoNote,
+        penghargaanNote,
+        penghargaanUrl: serializedPenghargaanUrls,
+        regulasiOrder: serializedRegulasiOrder,
+        softstructureOrder: serializedSoftstructureOrder,
+        kajianOrder: serializedKajianOrder,
+        gcgScoresJson: JSON.stringify(gcgScores),
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -6,5 +6,9 @@ import { sessionOptions, SessionData } from "@/lib/session";
 export async function POST() {
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
     session.destroy();
-    return NextResponse.json({ success: true });
+
+    // Hapus cookie role juga
+    const response = NextResponse.json({ success: true });
+    response.cookies.set("gcg_role", "", { maxAge: 0, path: "/" });
+    return response;
 }

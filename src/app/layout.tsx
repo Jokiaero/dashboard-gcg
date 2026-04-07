@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Providers from "@/components/Providers";
+import Providers from "@/components/shared/Providers";
 
 export const metadata: Metadata = {
   title: "Dashboard GCG - PT Semen Baturaja",
@@ -20,12 +20,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="shortcut icon" href="/assets/images/favicon.png" />
         <style>{`
           .sidebar {
-            background-color: #ffffff !important;
+            background-color: #2b4c3d !important;
           }
 
           /* Keep icon and label vertically centered and consistently aligned */
           .sidebar .nav .nav-item .nav-link {
             align-items: center !important;
+            color: #cfe7db !important;
+            border-radius: 8px;
+            transition: background-color 0.15s ease, color 0.15s ease;
           }
 
           .sidebar .nav .nav-item .nav-link i.menu-icon {
@@ -74,15 +77,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             line-height: 1.25;
           }
 
-          /* Top-level hover and active state: refined corporate green */
+          .sidebar .nav .nav-item .nav-link i,
+          .sidebar .nav .nav-item .nav-link .menu-title,
+          .sidebar .nav .nav-item .nav-link .menu-arrow {
+            color: inherit !important;
+          }
+
+          /* Top-level hover and active state: consistent with selected Dashboard style */
           .sidebar .nav:not(.sub-menu) > .nav-item:hover > .nav-link {
-            background-color: #e8f3ee !important;
-            color: #1f3b2f !important;
+            background-color: rgba(255, 255, 255, 0.12) !important;
+            color: #ffffff !important;
+          }
+
+          .sidebar .nav:not(.sub-menu) > .nav-item.active {
+            background-color: transparent !important;
           }
 
           .sidebar .nav .nav-item.active > .nav-link,
-          .sidebar .nav:not(.sub-menu) > .nav-item.active {
-            background-color: #2b4c3d !important;
+          .sidebar .nav:not(.sub-menu) > .nav-item.active > .nav-link,
+          .sidebar .nav:not(.sub-menu) > .nav-item > .nav-link[aria-expanded=true] {
+            background-color: rgba(255, 255, 255, 0.2) !important;
             color: #ffffff !important;
           }
 
@@ -92,25 +106,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             color: #ffffff !important;
           }
 
-          .sidebar .nav:not(.sub-menu) > .nav-item:hover > .nav-link i,
-          .sidebar .nav:not(.sub-menu) > .nav-item:hover > .nav-link span,
-          .sidebar .nav:not(.sub-menu) > .nav-item:hover > .nav-link .menu-arrow {
-            color: #1f3b2f !important;
+          /* Submenu area follows the same color system */
+          .sidebar .nav.sub-menu {
+            background-color: transparent !important;
           }
 
-          /* Submenu area uses light green surface */
-          .sidebar .nav.sub-menu {
-            background-color: #f3f8f5 !important;
+          .sidebar .nav.sub-menu .nav-item::before {
+            background-color: rgba(255, 255, 255, 0.35) !important;
+            opacity: 0.9;
           }
 
           .sidebar .nav.sub-menu .nav-item .nav-link {
-            color: #446255 !important;
+            color: #cfe7db !important;
+            font-weight: 500;
           }
 
           .sidebar .nav.sub-menu .nav-item .nav-link:hover,
           .sidebar .nav.sub-menu .nav-item .nav-link.active {
-            color: #1f3b2f !important;
-            background-color: #dcece4 !important;
+            color: #ffffff !important;
+            background-color: rgba(255, 255, 255, 0.18) !important;
             border-radius: 6px;
           }
         `}</style>

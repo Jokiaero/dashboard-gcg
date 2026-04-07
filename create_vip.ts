@@ -1,0 +1,36 @@
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  const username = process.argv[2] || 'vip';
+  const plainPassword = process.argv[3] || 'vip123';
+  const password = await bcrypt.hash(plainPassword, 10);
+  
+  await prisma.user.upsert({
+    where: { username },
+    update: {
+      password: password,
+      role: 'USER_VIP'
+    },
+    create: {
+      username,
+      password: password,
+      role: 'USER_VIP'
+    }
+  });
+  
+  console.log('Akun VIP (USER_VIP) sukses dibuat/diperbarui:');
+  console.log(`Username: ${username}`);
+  console.log(`Password: ${plainPassword}`);
+}
+
+main()
+  .catch(e => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

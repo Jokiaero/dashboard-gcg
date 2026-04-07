@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -41,11 +41,12 @@ model DataLaporan {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  username  String   @unique
-  password  String
-  role      String   @default("GUEST") // SUPERADMIN, STAFF, AUDITOR, GUEST
-  createdAt DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  password     String
+  role         String   @default("USER") // ADMIN, USER, USER_VIP
+  profileImage String?  @map("profile_image")
+  createdAt    DateTime @default(now())
 
   @@map("users")
 }
@@ -58,4 +59,61 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@map("audit_logs")
+}
+
+model DashboardSettings {
+  id               Int      @id
+  dashboardTitle   String   @map("dashboard_title")
+  dashboardSubtitle String  @map("dashboard_subtitle")
+  kajian2025       String   @map("kajian_2025")
+  kajian2024       String   @map("kajian_2024")
+  isoNote          String   @map("iso_note")
+  penghargaanNote  String   @map("penghargaan_note")
+  penghargaanUrl   String?  @map("penghargaan_url")
+  regulasiOrder    String?  @map("regulasi_order")
+  softstructureOrder String? @map("softstructure_order")
+  kajianOrder      String?  @map("kajian_order")
+  gcgScoresJson    String   @map("gcg_scores_json")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("dashboard_settings")
+}
+
+model UploadedDocument {
+  id           BigInt    @id @default(autoincrement())
+  category     String
+  name         String
+  originalName String?   @map("original_name")
+  url          String
+  size         BigInt    @default(0)
+  mimeType     String?   @map("mime_type")
+  uploadedBy   String?   @map("uploaded_by")
+  regulasiSlug String?   @map("regulasi_slug")
+  isDeleted    Boolean   @default(false) @map("is_deleted")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  @@unique([category, name])
+  @@index([category, isDeleted, updatedAt])
+  @@map("uploaded_documents")
+}
+
+model UploadedDocumentRecycle {
+  id           BigInt   @id @default(autoincrement())
+  category     String
+  name         String
+  originalName String?  @map("original_name")
+  url          String
+  size         BigInt   @default(0)
+  mimeType     String?  @map("mime_type")
+  uploadedBy   String?  @map("uploaded_by")
+  regulasiSlug String?  @map("regulasi_slug")
+  deletedAt    DateTime @default(now()) @map("deleted_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([category, name])
+  @@index([category, deletedAt])
+  @@map("uploaded_documents_recycle")
 }

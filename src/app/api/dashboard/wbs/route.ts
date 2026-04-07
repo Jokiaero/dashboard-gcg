@@ -1,24 +1,38 @@
 import { NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
 import { prisma } from "@/lib/prisma";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import * as XLSX from "xlsx";
+import { listDocumentsByCategory, syncCategoryFromFilesystem } from "@/lib/documentStore";
 
-function getWbsExcelPath() {
+function isExcelFileName(fileName: string) {
+  const lower = String(fileName || "").toLowerCase();
+  return lower.endsWith(".xlsx") || lower.endsWith(".xls");
+}
+
+async function getWbsExcelPath() {
   if (process.env.WBS_CHART_FILE?.trim()) {
     return process.env.WBS_CHART_FILE.trim();
   }
 
-  return path.join(
-    os.homedir(),
-    "Downloads",
-    "DASHBOARD GCG",
-    "DASHBOARD GCG",
-    "3. PELAPORAN",
-    "LAPORAN WBS (AKSES TERBATAS)",
-    "Grafik Laporan WBS.xlsx"
-  );
+  try {
+    await syncCategoryFromFilesystem("pelaporan_wbs");
+    const docs = await listDocumentsByCategory("pelaporan_wbs");
+    const latestExcel = docs
+      .filter((doc) => isExcelFileName(doc.name))
+      .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))[0];
+
+    if (latestExcel) {
+      return path.join(process.cwd(), "public", "assets", "pelaporan_wbs", latestExcel.name);
+    }
+  } catch {
+    // Keep fallback behavior below.
+  }
+
+  // Jika tidak ada file tersimpan, kembalikan string kosong agar sistem jatuh ke fallback "database" secara alami
+  return "";
 }
 
 function toNumber(value: unknown) {
@@ -31,10 +45,14 @@ function toNumber(value: unknown) {
 }
 
 async function readWbsFromExcel() {
-  const excelPath = getWbsExcelPath();
+  const excelPath = await getWbsExcelPath();
+  if (!excelPath) {
+    throw new Error("Tidak ada file Excel WBS di sistem Arsip.");
+  }
   await access(excelPath);
 
-  const workbook = XLSX.readFile(excelPath, { cellDates: false });
+  const buffer = await readFile(excelPath);
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
   const firstSheet = workbook.SheetNames[0];
 
   if (!firstSheet) {
@@ -99,7 +117,7 @@ export async function GET() {
     }));
 
     return NextResponse.json({ data, source: "database" });
-  } catch (error) {
+  } catch (error: any) {
     console.warn("WBS Excel source unavailable, fallback to database", error);
 
     try {
@@ -126,7 +144,7 @@ export async function GET() {
         ditindaklanjuti: Number(row.status_approved || 0),
       }));
 
-      return NextResponse.json({ data, source: "database" });
+      return NextResponse.json({ data, source: "database", debugError: error.message, stack: error.stack });
     } catch (dbError) {
       console.error("Failed to fetch WBS chart data", dbError);
       return NextResponse.json({ error: "Failed to fetch WBS chart data" }, { status: 500 });

@@ -5,6 +5,7 @@ export interface SessionData {
         id: number;
         username: string;
         role: string;
+        profileImage?: string;
     };
 }
 

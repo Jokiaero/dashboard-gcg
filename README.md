@@ -1,96 +1,161 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dokumentasi Teknis — Dashboard GCG PT Semen Baturaja
 
-## Getting Started
+Sistem Informasi Terintegrasi untuk Pengelolaan Good Corporate Governance.
 
-First, run the development server:
+Dokumen struktur package dapat dilihat di `docs/struktur-package.md`.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## 1. Struktural & Spesifikasi Aplikasi
+
+### 1.1 Deskripsi Sistem
+
+**Dashboard GCG** adalah sistem informasi berbasis web yang dikembangkan untuk PT Semen Baturaja Tbk guna mendukung pengelolaan, pemantauan, dan pelaporan Good Corporate Governance (GCG) perusahaan secara data-driven dan interaktif.
+
+### 1.2 Teknologi Stack
+
+| Lapisan | Teknologi |
+|---|---|
+| Framework | **Next.js 15 (App Router)** |
+| Bahasa | TypeScript |
+| UI Framework | Custom Bootstrap 5 + Vanilla CSS |
+| Database | **MySQL (via Laragon / Server Lokal)** |
+| ORM | Prisma |
+| Autentikasi | Iron-session (Secure Cookie-based) |
+| Charting | Recharts |
+| PDF Viewer | HTML `<iframe>` embed with PDF.js compatibility |
+
+### 1.3 Struktur Proyek (Clean Architecture)
+
+Proyek telah direstrukturisasi untuk meningkatkan modularitas dan skalabilitas:
+
+- **`src/@types`**: Definisi tipe data global TypeScript.
+- **`src/app/(groups)`**: Menggunakan *Route Groups* Next.js:
+    - **`(dashboard)`**: Halaman utama, laporan, assessment, dan regulasi.
+    - **`(admin)`**: Manajemen user, pengaturan, dan audit log.
+    - **`(auth)`**: Login dan registrasi.
+- **`src/components`**:
+    - **`layout/`**: `Navbar`, `Sidebar`, dan `DashboardLayout`.
+    - **`features/`**: Komponen spesifik per fitur (Laporan, Assessment, Admin).
+    - **`shared/`**: Komponen UI dasar dan `Providers`.
+- **`src/lib/`**: Utilitas database (Prisma), Session, Export PDF/Excel, dan Logger.
+
+### 1.4 Aktor Sistem & Hak Akses (RBAC)
+
+| Aktor | Identifier | Hak Akses |
+|---|---|---|
+| **SUPERADMIN** | `SUPERADMIN` | Kontrol penuh sistem, Manajemen User, & Audit Trail. |
+| **VIP** | `USER_VIP` | Akses baca seluruh laporan, PDF, & grafik. Edit Dashboard. |
+| **GUEST** | `GUEST` | View-only Dashboard & Regulasi. Dibatasi dari laporan detail. |
+
+---
+
+## 2. Diagram Sistem
+
+### 2.1 Use Case Diagram
+
+```mermaid
+flowchart TD
+    SUPERADMIN(["👤 SUPERADMIN"])
+    VIP(["👤 USER_VIP"])
+    GUEST(["👤 GUEST"])
+
+    subgraph UC["Use Cases — Dashboard GCG"]
+        UC1["Login / Logout"]
+        UC2["Lihat Dashboard Utama"]
+        UC3["Buka Regulasi (PDF Viewer)"]
+        UC4["Buka Softstructure GCG (PDF Viewer)"]
+        UC5["Lihat Laporan WBS"]
+        UC6["Lihat Laporan Risiko Keuangan"]
+        UC7["Lihat Laporan Monitoring Penyuapan"]
+        UC8["Lihat Laporan PPG ke KPK"]
+        UC9["Lihat Laporan Survey Awareness"]
+        UC10["Lihat Kajian Internal"]
+        UC11["Lihat Assessment GCG"]
+        UC12["Lihat Sertifikasi ISO 37001 (PDF)"]
+        UC13["Lihat Daftar Penghargaan"]
+        UC14["Lihat & Pantau Audit Trail"]
+        UC15["Kelola Pengguna (CRUD)"]
+        UC16["Export Excel / PDF"]
+    end
+
+    GUEST --> UC1
+    GUEST --> UC2
+    GUEST --> UC3
+
+    VIP --> UC1
+    VIP --> UC2
+    VIP --> UC3
+    VIP --> UC4
+    VIP --> UC5
+    VIP --> UC6
+    VIP --> UC7
+    VIP --> UC8
+    VIP --> UC9
+    VIP --> UC10
+    VIP --> UC11
+    VIP --> UC12
+    VIP --> UC13
+    VIP --> UC16
+
+    SUPERADMIN --> UC14
+    SUPERADMIN --> UC15
+    SUPERADMIN --> UC16
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2.2 Alur Autentikasi (Sequence Diagram)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```mermaid
+sequenceDiagram
+    actor Pengguna
+    participant Browser
+    participant NextJS as "Next.js Server"
+    participant DB as "MySQL (Prisma)"
+    participant Session as "Iron Session"
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Replace Dummy Data With Real Data
-
-The project now uses a seed importer from JSON (not random dummy generation).
-
-1. Create `prisma/data-laporan.json` by copying `prisma/data-laporan.example.json`.
-2. Fill it with your real data (array of objects).
-3. Run migration if needed:
-
-```bash
-npx prisma migrate dev
+    Pengguna->>Browser: Input username & password
+    Browser->>NextJS: POST /api/auth/login
+    NextJS->>DB: findUniqueUser(username)
+    DB-->>NextJS: User (hashed_password, role)
+    NextJS->>NextJS: bcrypt.compare(password, hash)
+    alt Auth GAGAL
+        NextJS-->>Browser: 401 Unauthorized
+    else Auth BERHASIL
+        NextJS->>Session: save({ id, username, role })
+        NextJS->>DB: AuditLog.create("LOGIN")
+        NextJS-->>Browser: 200 OK (Redirect)
+    end
 ```
 
-4. Import your real data:
+---
 
+## 3. Panduan Operasional (Import Data)
+
+Dashboard ini mendukung pembaruan data secara dinamis melalui file Excel.
+
+### 3.1 Import Laporan Via CLI
+Jika Anda ingin mengganti data secara massal melalui terminal:
+
+*   **Laporan Umum**: `npm run import:excel` (Membaca file `prisma/data-laporan.xlsx`)
+*   **Profil Risiko**: `npm run import:risk` (Membaca file `prisma/data-profil-risiko.xlsx`)
+*   **WBS Proyek**: `npm run import:wbs` (Update data WBS spesifik)
+
+### 3.2 Pembaruan Database
+Jika melakukan perubahan pada `schema.prisma`:
 ```bash
-npm run seed
+npx prisma generate
+npx prisma migrate dev --name nama_perubahan
 ```
 
-## Import Data Dari Excel (Replace Data Lama)
+---
 
-Jika Anda punya data laporan dalam file Excel (`.xlsx`), gunakan command ini untuk mengganti data lama:
+## 4. Panduan Pengembangan
 
-```bash
-npm run import:excel
-```
+1.  **Instalasi**: `npm install`
+2.  **Konfigurasi**: Sesuaikan `DATABASE_URL` di file `.env` (Format: `mysql://user:pass@localhost:3306/db_name`)
+3.  **Run Development**: `npm run dev`
+4.  **Build Production**: `npm run build && npm run start`
 
-Default file yang dibaca: `prisma/data-laporan.xlsx` (sheet pertama).
+---
 
-Jika file ada di lokasi lain (PowerShell):
-
-```bash
-$env:EXCEL_FILE="./path/to/file-anda.xlsx"; npm run import:excel
-```
-
-Catatan: command ini akan menghapus data lama di tabel `data_laporan` lalu mengisi data baru dari Excel.
-
-## Import Laporan Profil Risiko Dari Excel
-
-Untuk Profil Risiko, gunakan command berikut:
-
-```bash
-npm run import:risk
-```
-
-Default file yang dibaca: `prisma/data-profil-risiko.xlsx` (sheet pertama).
-
-Jika file ada di lokasi lain (PowerShell):
-
-```bash
-$env:RISK_EXCEL_FILE="./path/to/file-profil-risiko.xlsx"; npm run import:risk
-```
-
-Catatan: command ini hanya mengganti data dengan `department = RISK_PROFILE` sehingga tidak menghapus data WBS.
-
-Optional: use custom file path with `SEED_FILE`.
-
-```bash
-$env:SEED_FILE="./path/to/real-data.json"; npm run seed
-```
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+*Dokumentasi ini diperbarui secara berkala sesuai dengan perkembangan arsitektur sistem.*

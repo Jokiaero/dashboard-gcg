@@ -4,10 +4,11 @@ import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { sessionOptions, SessionData } from "@/lib/session";
 import { logAudit } from "@/lib/auditLogger";
+import { isBasicUserRole } from "@/lib/roles";
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-    if (!session.user || session.user.role === "AUDITOR" || session.user.role === "GUEST") {
+    if (!session.user || isBasicUserRole(session.user.role)) {
         return NextResponse.json({ error: "Terlarang. Anda tidak memiliki akses untuk mengubah data." }, { status: 403 });
     }
 
@@ -29,7 +30,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
-    if (!session.user || session.user.role === "AUDITOR" || session.user.role === "GUEST") {
+    if (!session.user || isBasicUserRole(session.user.role)) {
         return NextResponse.json({ error: "Terlarang. Anda tidak memiliki akses untuk menghapus data." }, { status: 403 });
     }
 
