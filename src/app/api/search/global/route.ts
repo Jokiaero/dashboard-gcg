@@ -6,6 +6,7 @@ import { sessionOptions, SessionData } from "@/lib/session";
 import { REGULASI_DOCS_BY_SLUG } from "@/lib/regulasiDocuments";
 import { ASSESSMENT_DOCS_BY_SLUG } from "@/lib/assessmentDocuments";
 import { ensureDocumentStoreTable } from "@/lib/documentStore";
+import { inferPelaporanCategoryFromName, isPelaporanCategory, PELAPORAN_ROUTE_MAP } from "@/lib/pelaporanClassifier";
 import { isAdminRole, isVipRole, normalizeAppRole } from "@/lib/roles";
 
 type SearchResultType = "menu" | "regulasi" | "assessment" | "dokumen" | "laporan";
@@ -182,21 +183,9 @@ const CATEGORY_ROUTE_MAP: Record<string, string> = {
     kajian: "/kajian-internal",
     penghargaan: "/berita-gcg",
     documents: "/admin",
-    pelaporan_wbs: "/laporan-wbs",
-    pelaporan_risiko: "/laporan-risiko-keuangan",
-    pelaporan_penyuapan: "/laporan-monitoring-risiko-penyuapan",
-    pelaporan_ppg: "/laporan-implementasi-ppg-kpk",
-    pelaporan_survey: "/laporan-survey-awareness-gcg",
+    ...PELAPORAN_ROUTE_MAP,
     approval_kepatuhan: "/approval-pernyataan-kepatuhan",
 };
-
-const PELAPORAN_CATEGORIES = new Set([
-    "pelaporan_wbs",
-    "pelaporan_risiko",
-    "pelaporan_penyuapan",
-    "pelaporan_ppg",
-    "pelaporan_survey",
-]);
 
 const RESTRICTED_USER_CATEGORIES = new Set([
     "assessment",
@@ -216,6 +205,18 @@ function isMatch(parts: Array<string | undefined | null>, query: string) {
 
 function formatDocumentCategory(category: string) {
     return category.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function resolveDocumentRoute(category: string, name: string, originalName?: string | null) {
+    const defaultRoute = CATEGORY_ROUTE_MAP[category] || "/";
+    if (isPelaporanCategory(category)) {
+        const inferredCategory = inferPelaporanCategoryFromName(name, originalName);
+        if (inferredCategory) {
+            return CATEGORY_ROUTE_MAP[inferredCategory] || defaultRoute;
+        }
+    }
+
+    return defaultRoute;
 }
 
 async function resolveRole() {
@@ -240,7 +241,7 @@ function canAccessDocumentCategory(category: string, role: string) {
 
     if (normalizedRole === "USER") {
         if (category === "documents") return false;
-        if (PELAPORAN_CATEGORIES.has(category)) return false;
+        if (isPelaporanCategory(category)) return false;
         if (RESTRICTED_USER_CATEGORIES.has(category)) return false;
         return true;
     }
@@ -278,7 +279,7 @@ async function findDocumentResults(rawQuery: string, role: string, take: number)
                 type: "dokumen",
                 title: row.originalName || row.name,
                 description: `Dokumen ${formatDocumentCategory(row.category)}`,
-                href: CATEGORY_ROUTE_MAP[row.category] || "/",
+                href: resolveDocumentRoute(row.category, row.name, row.originalName),
                 iconClass: "icon-paper",
                 iconColor: "bg-cyan-50 text-cyan-700",
             }));

@@ -15,6 +15,7 @@ import {
     restoreDocument,
     syncCategoryFromFilesystem,
 } from "@/lib/documentStore";
+import { removeDocumentThumbnail } from "@/lib/documentThumbnail";
 import { isAdminRole } from "@/lib/roles";
 
 const allowedCategories = [...ALLOWED_DOCUMENT_CATEGORIES];
@@ -95,6 +96,8 @@ export async function PATCH(req: NextRequest) {
             if (hasPhysicalFile) {
                 unlinkSync(filePath);
             }
+
+            await removeDocumentThumbnail(safeCategory, name);
 
             const affected = await deleteDocumentPermanently(safeCategory, name);
             if (!hasPhysicalFile && affected === 0) {

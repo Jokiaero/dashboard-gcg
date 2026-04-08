@@ -11,6 +11,7 @@ type DashboardSoftstructureOrderResponse = {
 type SoftstructureDocumentItem = {
     name: string;
     url: string;
+    thumbnailUrl?: string | null;
     modifiedAt?: string;
 };
 
@@ -23,6 +24,7 @@ type SoftstructureCatalogItem = {
     openHref: string;
     title: string;
     subtitle: string;
+    thumbnailHref?: string;
     isImage: boolean;
     previewHref: string;
 };
@@ -39,6 +41,12 @@ function toDisplayTitleFromFileName(fileName: string) {
 
 function isImageFile(fileName: string) {
     return /\.(png|jpe?g|webp|gif)$/i.test(fileName);
+}
+
+function appendVersion(url: string, token?: string) {
+    const value = token || String(Date.now());
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}v=${encodeURIComponent(value)}`;
 }
 
 function normalizeSoftstructureOrder(order: unknown): string[] {
@@ -82,6 +90,7 @@ function toCatalogItem(file: SoftstructureDocumentItem): SoftstructureCatalogIte
         openHref: file.url,
         title: knownMeta?.title || toDisplayTitleFromFileName(file.name) || file.name,
         subtitle: knownMeta?.subtitle || "Dokumen softstructure hasil unggahan admin",
+        thumbnailHref: file.thumbnailUrl ? appendVersion(file.thumbnailUrl, file.modifiedAt) : undefined,
         isImage,
         previewHref: isImage
             ? file.url
@@ -188,7 +197,18 @@ export default function SoftstructureCatalogPage() {
                                                 backgroundColor: "#ffffff",
                                             }}
                                         >
-                                            {item.isImage ? (
+                                            {item.thumbnailHref ? (
+                                                <img
+                                                    src={item.thumbnailHref}
+                                                    alt={item.title}
+                                                    style={{
+                                                        width: "100%",
+                                                        height: "100%",
+                                                        objectFit: "cover",
+                                                        display: "block",
+                                                    }}
+                                                />
+                                            ) : item.isImage ? (
                                                 <img
                                                     src={item.previewHref}
                                                     alt={item.title}

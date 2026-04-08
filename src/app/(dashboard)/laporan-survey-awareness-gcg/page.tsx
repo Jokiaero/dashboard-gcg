@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getExcelStats, formatExcelValue, getCategoryFileSummary } from "@/lib/excel";
+import PelaporanExcelTablePanel from "@/components/features/laporan/PelaporanExcelTablePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,11 @@ export default async function LaporanSurveyAwarenessGcgPage() {
                     </div>
                 ))}
             </div>
+
+            <PelaporanExcelTablePanel
+                category="pelaporan_survey"
+                title="Tabel Survey Awareness Sesuai Excel"
+            />
         </>
     );
 }

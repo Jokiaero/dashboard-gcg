@@ -67,7 +67,7 @@ export default function AdminRecyclePanel() {
         },
     });
 
-    const files = data?.files ?? [];
+    const files = useMemo(() => data?.files ?? [], [data?.files]);
 
     const visibleFiles = useMemo(() => {
         const normalizedKeyword = keyword.trim().toLowerCase();
@@ -99,6 +99,9 @@ export default function AdminRecyclePanel() {
         if (category === "kajian") {
             queryClient.invalidateQueries({ queryKey: ["dashboardSettingsKajianOrder"] });
             queryClient.invalidateQueries({ queryKey: ["kajianDocumentsCatalogList"] });
+        }
+        if (category === "pelaporan_risiko") {
+            queryClient.invalidateQueries({ queryKey: ["riskProfileData"] });
         }
     };
 
@@ -304,21 +307,20 @@ export default function AdminRecyclePanel() {
                                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                                         <a
                                             href={file.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                            download={file.name}
                                             style={{
                                                 padding: "4px 10px",
                                                 borderRadius: 6,
-                                                border: "1px solid #e2e8f0",
-                                                backgroundColor: "#fff",
-                                                color: "#475569",
+                                                border: "1px solid #dbeafe",
+                                                backgroundColor: "#eff6ff",
+                                                color: "#1d4ed8",
                                                 fontSize: 11,
                                                 fontWeight: 600,
                                                 textDecoration: "none",
                                                 cursor: "pointer",
                                             }}
                                         >
-                                            Lihat
+                                            Download
                                         </a>
                                         <button
                                             onClick={() => restoreMutation.mutate(file)}

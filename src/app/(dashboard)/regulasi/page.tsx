@@ -11,6 +11,7 @@ type DashboardRegulasiOrderResponse = {
 type RegulasiDocumentItem = {
     name: string;
     url: string;
+    thumbnailUrl?: string | null;
     modifiedAt?: string;
 };
 
@@ -23,17 +24,14 @@ type RegulasiCatalogItem = {
     openHref: string;
     title: string;
     subtitle: string;
+    thumbnailHref?: string;
+    previewHref: string;
 };
 
-function extractRegulasiNumber(value: string) {
-    const text = String(value || "").toUpperCase();
-    const match = text.match(/PER-\d+\/MBU\/\d+\/\d+/);
-    return match?.[0] || "PERATURAN MENTERI";
-}
-
-function toCoverTopic(title: string, subtitle: string) {
-    const source = String(subtitle || title || "").trim();
-    return source.toUpperCase();
+function appendVersion(url: string, token?: string) {
+    const value = token || String(Date.now());
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}v=${encodeURIComponent(value)}`;
 }
 
 function normalizeRegulasiOrder(order: unknown): string[] {
@@ -83,6 +81,8 @@ function toCatalogItem(file: RegulasiDocumentItem): RegulasiCatalogItem {
         openHref: file.url,
         title: knownDoc?.title || toDisplayTitleFromFileName(file.name) || file.name,
         subtitle: knownDoc?.subtitle || "Dokumen regulasi hasil unggahan admin",
+        thumbnailHref: file.thumbnailUrl ? appendVersion(file.thumbnailUrl, file.modifiedAt) : undefined,
+        previewHref: `${file.url}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`,
     };
 }
 
@@ -156,10 +156,7 @@ export default function RegulasiCatalogPage() {
                 )}
 
                 <div className="row g-3 g-xl-4">
-                    {regulasiEntries.map((item, index) => {
-                        const numberLabel = extractRegulasiNumber(`${item.title} ${item.subtitle}`);
-                        const topicLabel = toCoverTopic(item.title, item.subtitle);
-
+                    {regulasiEntries.map((item) => {
                         return (
                         <div className="col-12 col-md-6 col-xl-4" key={item.fileName}>
                             <a
@@ -169,192 +166,70 @@ export default function RegulasiCatalogPage() {
                                 className="text-decoration-none"
                             >
                                 <article
-                                    className="card h-100 border-0"
+                                    className="h-100"
                                     style={{
-                                        borderRadius: 14,
-                                        overflow: "hidden",
-                                        boxShadow: "0 8px 22px rgba(15, 23, 42, 0.09)",
                                         transition: "transform 0.2s ease, box-shadow 0.2s ease",
                                         cursor: "pointer",
-                                        backgroundColor: "#ffffff",
+                                        borderRadius: 10,
                                     }}
                                 >
                                     <div
                                         style={{
-                                            padding: "14px 14px 10px",
-                                            backgroundColor: "#f3f4f6",
+                                            borderRadius: 4,
+                                            backgroundColor: "#e5e7eb",
+                                            padding: 14,
+                                            boxShadow: "0 8px 22px rgba(15, 23, 42, 0.09)",
                                         }}
                                     >
                                         <div
                                             style={{
-                                                borderRadius: 2,
+                                                aspectRatio: "210 / 297",
+                                                borderRadius: 3,
+                                                overflow: "hidden",
                                                 border: "1px solid #d1d5db",
                                                 backgroundColor: "#ffffff",
-                                                aspectRatio: "210 / 297",
-                                                position: "relative",
-                                                padding: "14px 14px 12px",
-                                                overflow: "hidden",
-                                                pointerEvents: "none",
                                             }}
                                         >
-                                            <div
-                                                style={{
-                                                    position: "absolute",
-                                                    top: 10,
-                                                    right: 10,
-                                                    border: "1px solid #111827",
-                                                    padding: "1px 7px",
-                                                    fontSize: 10,
-                                                    fontWeight: 700,
-                                                    letterSpacing: 0.25,
-                                                    color: "#111827",
-                                                }}
-                                            >
-                                                DISTRIBUSI II
-                                            </div>
-
-                                            <div style={{ textAlign: "center", marginTop: 6 }}>
-                                                <div
+                                            {item.thumbnailHref ? (
+                                                <img
+                                                    src={item.thumbnailHref}
+                                                    alt={item.title}
                                                     style={{
-                                                        width: 38,
-                                                        height: 38,
-                                                        borderRadius: "50%",
-                                                        margin: "0 auto 8px",
-                                                        border: "1px solid #d4a857",
-                                                        color: "#b45309",
-                                                        fontSize: 11,
-                                                        fontWeight: 800,
-                                                        display: "flex",
-                                                        alignItems: "center",
-                                                        justifyContent: "center",
-                                                        fontFamily: "Georgia, Times New Roman, serif",
+                                                        width: "100%",
+                                                        height: "100%",
+                                                        objectFit: "cover",
+                                                        display: "block",
                                                     }}
-                                                >
-                                                    RI
-                                                </div>
-                                                <div
+                                                />
+                                            ) : (
+                                                <iframe
+                                                    src={item.previewHref}
+                                                    title={`Preview ${item.title}`}
                                                     style={{
-                                                        fontFamily: "Georgia, Times New Roman, serif",
-                                                        fontSize: 9,
-                                                        fontWeight: 700,
-                                                        letterSpacing: 0.15,
-                                                        color: "#b45309",
-                                                        textTransform: "uppercase",
-                                                        lineHeight: 1.2,
+                                                        width: "100%",
+                                                        height: "100%",
+                                                        border: "none",
+                                                        display: "block",
+                                                        pointerEvents: "none",
                                                     }}
-                                                >
-                                                    Menteri Badan Usaha Milik Negara
-                                                </div>
-                                                <div
-                                                    style={{
-                                                        fontFamily: "Georgia, Times New Roman, serif",
-                                                        fontSize: 9,
-                                                        fontWeight: 700,
-                                                        letterSpacing: 0.15,
-                                                        color: "#b45309",
-                                                        textTransform: "uppercase",
-                                                        lineHeight: 1.2,
-                                                    }}
-                                                >
-                                                    Republik Indonesia
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                style={{
-                                                    textAlign: "center",
-                                                    marginTop: 30,
-                                                    fontFamily: "Georgia, Times New Roman, serif",
-                                                    color: "#111827",
-                                                }}
-                                            >
-                                                <div style={{ fontSize: 11, fontWeight: 700 }}>SALINAN</div>
-                                                <div
-                                                    style={{
-                                                        marginTop: 8,
-                                                        fontSize: 10,
-                                                        lineHeight: 1.45,
-                                                        fontWeight: 700,
-                                                        textTransform: "uppercase",
-                                                    }}
-                                                >
-                                                    Peraturan Menteri Badan Usaha Milik Negara
-                                                </div>
-                                                <div
-                                                    style={{
-                                                        marginTop: 3,
-                                                        fontSize: 11,
-                                                        lineHeight: 1.45,
-                                                        fontWeight: 700,
-                                                        textTransform: "uppercase",
-                                                    }}
-                                                >
-                                                    Nomor {numberLabel}
-                                                </div>
-                                                <div
-                                                    style={{
-                                                        marginTop: 6,
-                                                        fontSize: 10,
-                                                        lineHeight: 1.45,
-                                                        fontWeight: 700,
-                                                        textTransform: "uppercase",
-                                                    }}
-                                                >
-                                                    Tentang
-                                                </div>
-                                                <div
-                                                    style={{
-                                                        marginTop: 3,
-                                                        fontSize: 10,
-                                                        lineHeight: 1.45,
-                                                        fontWeight: 700,
-                                                        textTransform: "uppercase",
-                                                    }}
-                                                >
-                                                    {topicLabel}
-                                                </div>
-                                            </div>
-
-                                            <div
-                                                style={{
-                                                    position: "absolute",
-                                                    left: "50%",
-                                                    top: "58%",
-                                                    transform: "translate(-50%, -50%) rotate(-33deg)",
-                                                    fontFamily: "Georgia, Times New Roman, serif",
-                                                    fontSize: 38,
-                                                    letterSpacing: 0.3,
-                                                    color: "rgba(15, 23, 42, 0.09)",
-                                                    fontWeight: 700,
-                                                    whiteSpace: "nowrap",
-                                                }}
-                                            >
-                                                jdih.bumn.go.id
-                                            </div>
-
-                                            <div
-                                                style={{
-                                                    position: "absolute",
-                                                    left: 14,
-                                                    right: 14,
-                                                    bottom: 12,
-                                                    fontFamily: "Georgia, Times New Roman, serif",
-                                                    fontSize: 9,
-                                                    lineHeight: 1.4,
-                                                    color: "#111827",
-                                                }}
-                                            >
-                                                <strong>Menimbang:</strong> bahwa ketentuan tata kelola BUMN perlu diselaraskan untuk mendukung
-                                                pengelolaan korporasi yang lebih efektif dan akuntabel.
-                                            </div>
+                                                />
+                                            )}
                                         </div>
                                     </div>
 
-                                    <div className="card-body" style={{ padding: "12px 14px 16px" }}>
-                                        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.45, color: "#475569", fontWeight: 700 }}>
+                                    <div className="text-center" style={{ padding: "12px 8px 0" }}>
+                                        <p
+                                            style={{
+                                                margin: 0,
+                                                fontSize: 18,
+                                                lineHeight: 1.15,
+                                                color: "#111827",
+                                                fontWeight: 500,
+                                            }}
+                                        >
                                             {item.title}
                                         </p>
-                                        <p style={{ margin: "4px 0 0", fontSize: 12, lineHeight: 1.45, color: "#64748b" }}>
+                                        <p style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.4, color: "#6b7280" }}>
                                             {item.subtitle}
                                         </p>
                                     </div>

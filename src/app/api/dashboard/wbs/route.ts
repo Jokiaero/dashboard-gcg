@@ -1,150 +1,382 @@
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
-import { prisma } from "@/lib/prisma";
 import { access, readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import * as XLSX from "xlsx";
-import { listDocumentsByCategory, syncCategoryFromFilesystem } from "@/lib/documentStore";
+import {
+  listDeletedDocumentsByCategory,
+  listDocumentsByCategory,
+  syncCategoryFromFilesystem,
+} from "@/lib/documentStore";
+import { prisma } from "@/lib/prisma";
+
+type WbsChartItem = {
+  tahun: string;
+  laporanWbs: number;
+  ditindaklanjuti: number;
+};
+
+type WbsSourceOption = {
+  category: "pelaporan_wbs";
+  name: string;
+  url: string;
+  modifiedAt: string;
+  size: number;
+  type: string;
+};
+
+const WBS_CATEGORY = "pelaporan_wbs";
+
+const YEAR_HEADER_KEYS = ["tahun", "year", "periode", "thn"];
+const LAPORAN_HEADER_KEYS = [
+  "laporanwbs",
+  "jumlahlaporanwbs",
+  "totallaporanwbs",
+  "jumlahlaporan",
+  "totallaporan",
+  "laporan",
+];
+const TINDAK_HEADER_KEYS = [
+  "statuslaporanditindaklanjuti",
+  "statusditindaklanjuti",
+  "jumlahditindaklanjuti",
+  "ditindaklanjuti",
+  "tindaklanjut",
+  "followup",
+  "progress",
+  "closed",
+];
 
 function isExcelFileName(fileName: string) {
   const lower = String(fileName || "").toLowerCase();
   return lower.endsWith(".xlsx") || lower.endsWith(".xls");
 }
 
-async function getWbsExcelPath() {
-  if (process.env.WBS_CHART_FILE?.trim()) {
-    return process.env.WBS_CHART_FILE.trim();
+function normalizeTableCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function normalizeHeaderKey(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function extractYear(value: unknown): string {
+  const text = normalizeTableCell(value);
+  if (!text) return "";
+
+  const matched = text.match(/(?:19|20)\d{2}/);
+  if (matched?.[0]) {
+    return matched[0];
   }
 
-  try {
-    await syncCategoryFromFilesystem("pelaporan_wbs");
-    const docs = await listDocumentsByCategory("pelaporan_wbs");
-    const latestExcel = docs
-      .filter((doc) => isExcelFileName(doc.name))
-      .sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt))[0];
-
-    if (latestExcel) {
-      return path.join(process.cwd(), "public", "assets", "pelaporan_wbs", latestExcel.name);
-    }
-  } catch {
-    // Keep fallback behavior below.
+  const numeric = Number(text);
+  if (Number.isInteger(numeric) && numeric >= 1900 && numeric <= 2999) {
+    return String(numeric);
   }
 
-  // Jika tidak ada file tersimpan, kembalikan string kosong agar sistem jatuh ke fallback "database" secara alami
   return "";
 }
 
-function toNumber(value: unknown) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
   }
 
-  const parsed = Number(String(value ?? "").trim());
-  return Number.isFinite(parsed) ? parsed : 0;
+  const text = normalizeTableCell(value)
+    .replace(/\u00a0/g, " ")
+    .replace(/%/g, "")
+    .replace(/\s+/g, "");
+  if (!text) return null;
+
+  const localeNormalized = (() => {
+    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(text)) {
+      return text.replace(/\./g, "").replace(",", ".");
+    }
+
+    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(text)) {
+      return text.replace(/,/g, "");
+    }
+
+    return text.replace(",", ".");
+  })();
+
+  const parsed = Number(localeNormalized);
+  if (Number.isFinite(parsed)) {
+    return parsed;
+  }
+
+  const fallbackMatch = localeNormalized.match(/-?\d+(?:\.\d+)?/);
+  if (!fallbackMatch) {
+    return null;
+  }
+
+  const fallbackParsed = Number(fallbackMatch[0]);
+  return Number.isFinite(fallbackParsed) ? fallbackParsed : null;
 }
 
-async function readWbsFromExcel() {
-  const excelPath = await getWbsExcelPath();
-  if (!excelPath) {
-    throw new Error("Tidak ada file Excel WBS di sistem Arsip.");
+function findHeaderIndexByKeys(headers: string[], keys: string[]): number {
+  const normalizedHeaders = headers.map((header) => normalizeHeaderKey(header));
+  for (const key of keys) {
+    const matched = normalizedHeaders.findIndex((header) => header.includes(key));
+    if (matched >= 0) return matched;
   }
-  await access(excelPath);
+  return -1;
+}
 
-  const buffer = await readFile(excelPath);
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
-  const firstSheet = workbook.SheetNames[0];
+function scoreHeaderCandidateRow(cells: string[]): number {
+  const nonEmpty = cells.filter((cell) => normalizeTableCell(cell) !== "");
+  if (nonEmpty.length === 0) return -1;
 
-  if (!firstSheet) {
+  const normalized = nonEmpty.map((cell) => normalizeHeaderKey(cell));
+  const yearHints = normalized.some((cell) => YEAR_HEADER_KEYS.some((key) => cell.includes(key))) ? 5 : 0;
+  const laporanHints = normalized.some((cell) => LAPORAN_HEADER_KEYS.some((key) => cell.includes(key))) ? 5 : 0;
+  const tindakHints = normalized.some((cell) => TINDAK_HEADER_KEYS.some((key) => cell.includes(key))) ? 5 : 0;
+
+  return nonEmpty.length + yearHints + laporanHints + tindakHints;
+}
+
+function looksLikeWbsDataRow(cells: string[]): boolean {
+  const yearExists = cells.some((cell) => extractYear(cell) !== "");
+  const numericExists = cells.some((cell) => toFiniteNumber(cell) !== null);
+  return yearExists && numericExists;
+}
+
+function pickHeaderRowIndex(sheetRows: string[][]): number {
+  const scanLimit = Math.min(sheetRows.length, 15);
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  for (let i = 0; i < scanLimit; i += 1) {
+    const score = scoreHeaderCandidateRow(sheetRows[i] || []);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestScore < 4 && looksLikeWbsDataRow(sheetRows[0] || [])) {
+    return -1;
+  }
+
+  return bestIndex;
+}
+
+function mergeRowsByYear(rows: WbsChartItem[]): WbsChartItem[] {
+  const yearlyMap = new Map<string, WbsChartItem>();
+
+  rows.forEach((row) => {
+    const current = yearlyMap.get(row.tahun) || {
+      tahun: row.tahun,
+      laporanWbs: 0,
+      ditindaklanjuti: 0,
+    };
+
+    current.laporanWbs += Number(row.laporanWbs || 0);
+    current.ditindaklanjuti += Number(row.ditindaklanjuti || 0);
+    yearlyMap.set(row.tahun, current);
+  });
+
+  return Array.from(yearlyMap.values()).sort((a, b) => a.tahun.localeCompare(b.tahun, "id"));
+}
+
+function parseWbsRowsFromSheet(sheet: XLSX.WorkSheet): WbsChartItem[] {
+  const sheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+  if (sheetRows.length === 0) {
     return [];
   }
 
-  const sheet = workbook.Sheets[firstSheet];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+  const matrixRows = sheetRows.map((row) => (row || []).map((cell) => normalizeTableCell(cell)));
+  const headerIndex = pickHeaderRowIndex(matrixRows);
 
-  return rows
+  const headerRow = headerIndex >= 0 ? matrixRows[headerIndex] || [] : [];
+  const yearIndex = findHeaderIndexByKeys(headerRow, YEAR_HEADER_KEYS);
+  const laporanIndex = findHeaderIndexByKeys(headerRow, LAPORAN_HEADER_KEYS);
+  const tindakIndex = findHeaderIndexByKeys(headerRow, TINDAK_HEADER_KEYS);
+
+  const dataRows = matrixRows.slice(headerIndex + 1);
+
+  const parsedRows = dataRows
     .map((row) => {
-      const tahun = String(row["Tahun"] ?? row["tahun"] ?? "").trim();
-      const laporanWbs = toNumber(row["Laporan WBS"] ?? row["laporan_wbs"] ?? row["JUMLAH_LAPORAN_WBS"]);
-      const ditindaklanjuti = toNumber(
-        row["Status Laporan Ditindaklanjuti"] ??
-          row["status_laporan_ditindaklanjuti"] ??
-          row["DITINDAKLANJUTI"]
-      );
-
+      const yearValue = yearIndex >= 0 ? row[yearIndex] : "";
+      const tahun = extractYear(yearValue) || row.map((cell) => extractYear(cell)).find(Boolean) || "";
       if (!tahun) {
         return null;
       }
+
+      const explicitLaporan = laporanIndex >= 0 ? toFiniteNumber(row[laporanIndex]) : null;
+      const explicitTindak = tindakIndex >= 0 ? toFiniteNumber(row[tindakIndex]) : null;
+
+      const fallbackNumbers = row
+        .map((cell) => ({
+          value: toFiniteNumber(cell),
+          isYear: extractYear(cell) !== "",
+        }))
+        .filter((item) => item.value !== null && !item.isYear)
+        .map((item) => Number(item.value));
+
+      const laporanWbs = explicitLaporan ?? fallbackNumbers[0] ?? 0;
+      const ditindaklanjuti = explicitTindak ?? fallbackNumbers[1] ?? 0;
 
       return {
         tahun,
         laporanWbs,
         ditindaklanjuti,
-      };
+      } satisfies WbsChartItem;
     })
-    .filter((item): item is { tahun: string; laporanWbs: number; ditindaklanjuti: number } => item !== null)
-    .sort((a, b) => a.tahun.localeCompare(b.tahun, "id"));
+    .filter((item): item is WbsChartItem => item !== null);
+
+  return mergeRowsByYear(parsedRows);
 }
 
-export async function GET() {
-  try {
-    const excelData = await readWbsFromExcel();
-    if (excelData.length > 0) {
-      return NextResponse.json({ data: excelData, source: "excel" });
-    }
+async function listWbsExcelSources(): Promise<WbsSourceOption[]> {
+  await syncCategoryFromFilesystem(WBS_CATEGORY);
 
-    const rows = await prisma.dataLaporan.findMany({
-      where: {
-        department: "WBS",
-        tahun: {
-          not: null,
-        },
-      },
-      orderBy: {
-        tahun: "asc",
-      },
-      select: {
-        tahun: true,
-        pers_no: true,
-        status_approved: true,
-      },
-    });
+  const docs = await listDocumentsByCategory(WBS_CATEGORY);
+  const recycledDocs = await listDeletedDocumentsByCategory(WBS_CATEGORY);
+  const recycledNameSet = new Set(
+    recycledDocs
+      .filter((doc) => isExcelFileName(doc.name))
+      .map((doc) => String(doc.name || "").toLowerCase())
+  );
 
-    const data = rows.map((row) => ({
-      tahun: row.tahun || "-",
-      laporanWbs: Number(row.pers_no || 0),
-      ditindaklanjuti: Number(row.status_approved || 0),
+  const sources = docs
+    .filter((doc) => isExcelFileName(doc.name))
+    .filter((doc) => !recycledNameSet.has(String(doc.name || "").toLowerCase()))
+    .map((doc) => ({
+      category: WBS_CATEGORY,
+      name: doc.name,
+      url: doc.url,
+      modifiedAt: doc.modifiedAt,
+      size: doc.size,
+      type: doc.type,
     }));
 
-    return NextResponse.json({ data, source: "database" });
-  } catch (error: any) {
+  return sources.sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+}
+
+async function readWbsFromExcelSource(source: WbsSourceOption): Promise<WbsChartItem[]> {
+  const filePath = path.join(process.cwd(), "public", "assets", source.category, source.name);
+  await access(filePath);
+
+  const buffer = await readFile(filePath);
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: false });
+
+  const parsedRows: WbsChartItem[] = [];
+  workbook.SheetNames.forEach((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+    parsedRows.push(...parseWbsRowsFromSheet(sheet));
+  });
+
+  return mergeRowsByYear(parsedRows);
+}
+
+async function readPreferredWbsFromExcel(requestedSourceName: string): Promise<{
+  data: WbsChartItem[];
+  sourceFile: WbsSourceOption | null;
+  availableSources: WbsSourceOption[];
+}> {
+  const availableSources = await listWbsExcelSources();
+  if (availableSources.length === 0) {
+    return { data: [], sourceFile: null, availableSources };
+  }
+
+  if (requestedSourceName) {
+    const selected = availableSources.find((source) => source.name === requestedSourceName) || null;
+    if (!selected) {
+      return { data: [], sourceFile: null, availableSources };
+    }
+
+    const parsed = await readWbsFromExcelSource(selected);
+    return { data: parsed, sourceFile: selected, availableSources };
+  }
+
+  let bestSource: WbsSourceOption | null = null;
+  let bestRows: WbsChartItem[] = [];
+
+  for (const source of availableSources) {
+    const parsedRows = await readWbsFromExcelSource(source);
+    if (parsedRows.length > bestRows.length) {
+      bestRows = parsedRows;
+      bestSource = source;
+    }
+  }
+
+  return { data: bestRows, sourceFile: bestSource, availableSources };
+}
+
+async function readWbsFromDatabase(): Promise<WbsChartItem[]> {
+  const rows = await prisma.dataLaporan.findMany({
+    where: {
+      OR: [{ department: "WBS" }, { divisi: "WBS" }],
+      tahun: {
+        not: null,
+      },
+    },
+    orderBy: {
+      tahun: "asc",
+    },
+    select: {
+      tahun: true,
+      pers_no: true,
+      status_approved: true,
+    },
+  });
+
+  const mappedRows = rows
+    .map((row) => ({
+      tahun: String(row.tahun || "").trim(),
+      laporanWbs: Number(row.pers_no || 0),
+      ditindaklanjuti: Number(row.status_approved || 0),
+    }))
+    .filter((item) => item.tahun !== "");
+
+  return mergeRowsByYear(mappedRows);
+}
+
+export async function GET(request: Request) {
+  let availableSources: WbsSourceOption[] = [];
+  let sourceFile: WbsSourceOption | null = null;
+
+  try {
+    const requestUrl = new URL(request.url);
+    const requestedSourceName = requestUrl.searchParams.get("sourceName")?.trim() || "";
+
+    const excelResult = await readPreferredWbsFromExcel(requestedSourceName);
+    availableSources = excelResult.availableSources;
+    sourceFile = excelResult.sourceFile;
+
+    if (excelResult.data.length > 0) {
+      return NextResponse.json({
+        data: excelResult.data,
+        source: "excel",
+        sourceFile,
+        availableSources,
+      });
+    }
+
+    const data = await readWbsFromDatabase();
+    return NextResponse.json({
+      data,
+      source: data.length > 0 ? "database" : "none",
+      sourceFile,
+      availableSources,
+    });
+  } catch (error: unknown) {
     console.warn("WBS Excel source unavailable, fallback to database", error);
 
     try {
-      const rows = await prisma.dataLaporan.findMany({
-        where: {
-          department: "WBS",
-          tahun: {
-            not: null,
-          },
-        },
-        orderBy: {
-          tahun: "asc",
-        },
-        select: {
-          tahun: true,
-          pers_no: true,
-          status_approved: true,
-        },
+      const data = await readWbsFromDatabase();
+      return NextResponse.json({
+        data,
+        source: data.length > 0 ? "database" : "none",
+        sourceFile,
+        availableSources,
       });
-
-      const data = rows.map((row) => ({
-        tahun: row.tahun || "-",
-        laporanWbs: Number(row.pers_no || 0),
-        ditindaklanjuti: Number(row.status_approved || 0),
-      }));
-
-      return NextResponse.json({ data, source: "database", debugError: error.message, stack: error.stack });
     } catch (dbError) {
       console.error("Failed to fetch WBS chart data", dbError);
       return NextResponse.json({ error: "Failed to fetch WBS chart data" }, { status: 500 });

@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import path from "path";
 import { prisma } from "@/lib/prisma";
+import { resolveExistingThumbnailUrl } from "@/lib/documentThumbnail";
 
 export const ALLOWED_DOCUMENT_CATEGORIES = [
     "regulasi",
@@ -24,6 +25,7 @@ type UploadRecordPayload = {
     name: string;
     originalName?: string;
     url: string;
+    thumbnailUrl?: string | null;
     size: number;
     mimeType?: string;
     uploadedBy?: string;
@@ -84,6 +86,7 @@ export async function upsertDocumentRecord(payload: UploadRecordPayload) {
         update: {
             originalName: payload.originalName ?? null,
             url: payload.url,
+            thumbnailUrl: payload.thumbnailUrl ?? null,
             size: BigInt(payload.size),
             mimeType: payload.mimeType ?? null,
             uploadedBy: payload.uploadedBy ?? null,
@@ -96,6 +99,7 @@ export async function upsertDocumentRecord(payload: UploadRecordPayload) {
             name: payload.name,
             originalName: payload.originalName ?? null,
             url: payload.url,
+            thumbnailUrl: payload.thumbnailUrl ?? null,
             size: BigInt(payload.size),
             mimeType: payload.mimeType ?? null,
             uploadedBy: payload.uploadedBy ?? null,
@@ -123,6 +127,7 @@ export async function markDocumentDeleted(category: string, name: string): Promi
             update: {
                 originalName: active.originalName,
                 url: active.url,
+                thumbnailUrl: active.thumbnailUrl,
                 size: active.size,
                 mimeType: active.mimeType,
                 uploadedBy: active.uploadedBy,
@@ -134,6 +139,7 @@ export async function markDocumentDeleted(category: string, name: string): Promi
                 name: active.name,
                 originalName: active.originalName,
                 url: active.url,
+                thumbnailUrl: active.thumbnailUrl,
                 size: active.size,
                 mimeType: active.mimeType,
                 uploadedBy: active.uploadedBy,
@@ -167,6 +173,7 @@ export async function restoreDocument(category: string, name: string): Promise<n
             update: {
                 originalName: recycled.originalName,
                 url: recycled.url,
+                thumbnailUrl: recycled.thumbnailUrl,
                 size: recycled.size,
                 mimeType: recycled.mimeType,
                 uploadedBy: recycled.uploadedBy,
@@ -179,6 +186,7 @@ export async function restoreDocument(category: string, name: string): Promise<n
                 name: recycled.name,
                 originalName: recycled.originalName,
                 url: recycled.url,
+                thumbnailUrl: recycled.thumbnailUrl,
                 size: recycled.size,
                 mimeType: recycled.mimeType,
                 uploadedBy: recycled.uploadedBy,
@@ -224,6 +232,7 @@ export async function listDocumentsByCategory(category: string) {
     return rows.map((row) => ({
         name: row.name,
         url: row.url,
+        thumbnailUrl: row.thumbnailUrl,
         size: toNumberSize(row.size),
         type: inferFileType(row.name),
         category: row.category,
@@ -245,6 +254,7 @@ export async function listDeletedDocumentsByCategory(category: string) {
     return rows.map((row) => ({
         name: row.name,
         url: row.url,
+        thumbnailUrl: row.thumbnailUrl,
         size: toNumberSize(row.size),
         type: inferFileType(row.name),
         category: row.category,
@@ -265,6 +275,7 @@ export async function listDeletedDocumentsAllCategories() {
     return rows.map((row) => ({
         name: row.name,
         url: row.url,
+        thumbnailUrl: row.thumbnailUrl,
         size: toNumberSize(row.size),
         type: inferFileType(row.name),
         category: row.category,
@@ -306,6 +317,7 @@ export async function syncCategoryFromFilesystem(category: string) {
                 name: fileName,
                 originalName: fileName,
                 url: `/assets/${category}/${fileName}`,
+                thumbnailUrl: resolveExistingThumbnailUrl(category, fileName),
                 size: stat.size,
                 mimeType: inferMimeByExtension(fileName),
             });

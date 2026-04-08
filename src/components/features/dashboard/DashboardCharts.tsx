@@ -344,11 +344,6 @@ export default function DashboardCharts() {
     const visibleLaporanItems = isBasicUser
         ? laporanItems.filter((item) => !item.href.startsWith("/laporan-") && !USER_HIDDEN_DASHBOARD_PATHS.has(item.href))
         : laporanItems;
-    const penghargaanLines = (dashboardSettings?.penghargaanNote || "")
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    const renderPenghargaanLines = penghargaanLines;
     const dashboardHeaderTitle = !dashboardSettings?.dashboardTitle || dashboardSettings.dashboardTitle === "Improvement Dashboard GCG"
         ? "DASHBOARD GCG"
         : dashboardSettings.dashboardTitle;
@@ -902,10 +897,10 @@ export default function DashboardCharts() {
                             </div>
                         )}
 
-                        {/* ISO + Berita GCG */}
+                        {/* ISO */}
                         <div className="card shadow-sm flex-grow-1" style={{ borderRadius: 8 }}>
                             <div className="card-body p-3">
-                                <SectionTitle>ISO 37001 & Berita GCG</SectionTitle>
+                                <SectionTitle>ISO 37001</SectionTitle>
                                 <div style={{ fontSize: 12, color: "#475569", marginBottom: 10 }}>
                                     {dashboardSettings?.isoNote || "Sertifikasi SNI ISO 37001:2016 tersedia dan dapat diakses langsung."}
                                 </div>
@@ -929,21 +924,6 @@ export default function DashboardCharts() {
                                             </a>
                                         </>
                                     )}
-                                </div>
-                                <div style={{ padding: "8px 10px", backgroundColor: "#fefce8", borderRadius: 7, border: "1px solid #fef08a" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>📰 Berita GCG</div>
-                                    <div style={{ fontSize: 11, color: "#78350f", display: "flex", flexDirection: "column", gap: 3 }}>
-                                        {renderPenghargaanLines.length > 0 ? (
-                                            renderPenghargaanLines.map((line, index) => (
-                                                <div key={`${index}-${line}`} style={{ display: "flex", gap: 6 }}>
-                                                    <span style={{ flexShrink: 0 }}>•</span>
-                                                    <span>{line}</span>
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div style={{ color: "#a16207" }}>Belum ada data berita GCG.</div>
-                                        )}
-                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -13,6 +13,11 @@ type GcgScore = {
   value: number;
 };
 
+type DashboardMeta = {
+  gcgScores: GcgScore[];
+  riskProfileSourceName: string;
+};
+
 type DashboardSettingsRecord = {
   dashboardTitle: string;
   dashboardSubtitle: string;
@@ -40,22 +45,29 @@ const DEFAULT_GCG_SCORES: GcgScore[] = [
   { year: "2024", value: 92.84 },
 ];
 
+const DEFAULT_DASHBOARD_META: DashboardMeta = {
+  gcgScores: DEFAULT_GCG_SCORES,
+  riskProfileSourceName: "",
+};
+
 const DEFAULT_SETTINGS: DashboardSettingsRecord = {
   dashboardTitle: "DASHBOARD GCG",
   dashboardSubtitle: "Meningkatkan Efektivitas dan Efisiensi Pengawasan GCG",
   kajian2025: "100%",
   kajian2024: "98%",
   isoNote: "Sertifikasi SNI ISO 37001:2016 tersedia dan dapat diakses langsung.",
-  penghargaanNote: "The Most Committed GRC Leader 2025 untuk Direktur Utama SMBR.\nTOP GRC Awards 2025 #4Stars untuk kategori Perusahaan.\nPenghargaan lainnya di tahun sebelumnya.",
-  penghargaanUrl: "https://semenbaturaja.co.id/komitmen-grc-berbuah-manis-semen-baturaja-kembali-dianugerahi-top-grc-awards-2025/",
+  penghargaanNote: "",
+  penghargaanUrl: "",
   regulasiOrder: JSON.stringify(DEFAULT_REGULASI_ORDER),
   softstructureOrder: JSON.stringify(DEFAULT_SOFTSTRUCTURE_ORDER),
   kajianOrder: JSON.stringify(DEFAULT_KAJIAN_ORDER),
-  gcgScoresJson: JSON.stringify(DEFAULT_GCG_SCORES),
+  gcgScoresJson: JSON.stringify(DEFAULT_DASHBOARD_META),
 };
 
 const LEGACY_ISO_NOTE = "Sertifikat SMAP tersedia dan dapat diakses langsung.";
 const LEGACY_PENGHARGAAN_NOTE = "Data penghargaan belum tersedia.";
+const LEGACY_SEEDED_PENGHARGAAN_NOTE = "The Most Committed GRC Leader 2025 untuk Direktur Utama SMBR.\nTOP GRC Awards 2025 #4Stars untuk kategori Perusahaan.\nPenghargaan lainnya di tahun sebelumnya.";
+const LEGACY_SEEDED_PENGHARGAAN_URL = "https://semenbaturaja.co.id/komitmen-grc-berbuah-manis-semen-baturaja-kembali-dianugerahi-top-grc-awards-2025/";
 
 function normalizeExternalUrl(rawValue: unknown): string {
   const raw = String(rawValue ?? "").trim();
@@ -229,6 +241,42 @@ function normalizeGcgScores(input: unknown): GcgScore[] {
   return rows.length > 0 ? rows : DEFAULT_GCG_SCORES;
 }
 
+function parseDashboardMeta(rawValue: unknown): DashboardMeta {
+  try {
+    const parsed = JSON.parse(String(rawValue ?? ""));
+
+    if (Array.isArray(parsed)) {
+      return {
+        gcgScores: normalizeGcgScores(parsed),
+        riskProfileSourceName: "",
+      };
+    }
+
+    if (parsed && typeof parsed === "object") {
+      const obj = parsed as {
+        gcgScores?: unknown;
+        riskProfileSourceName?: unknown;
+      };
+
+      return {
+        gcgScores: normalizeGcgScores(obj.gcgScores),
+        riskProfileSourceName: String(obj.riskProfileSourceName ?? "").trim(),
+      };
+    }
+  } catch {
+    // Backward compatibility with malformed legacy value.
+  }
+
+  return { ...DEFAULT_DASHBOARD_META };
+}
+
+function serializeDashboardMeta(meta: DashboardMeta): string {
+  return JSON.stringify({
+    gcgScores: normalizeGcgScores(meta.gcgScores),
+    riskProfileSourceName: String(meta.riskProfileSourceName || "").trim(),
+  });
+}
+
 async function ensureDashboardSettingsRow() {
   await prisma.dashboardSettings.upsert({
     where: { id: 1 },
@@ -260,11 +308,11 @@ async function ensureDashboardSettingsRow() {
     patch.isoNote = DEFAULT_SETTINGS.isoNote;
   }
 
-  if (current.penghargaanNote === LEGACY_PENGHARGAAN_NOTE) {
+  if (current.penghargaanNote === LEGACY_PENGHARGAAN_NOTE || current.penghargaanNote === LEGACY_SEEDED_PENGHARGAAN_NOTE) {
     patch.penghargaanNote = DEFAULT_SETTINGS.penghargaanNote;
   }
 
-  if (!current.penghargaanUrl) {
+  if (!current.penghargaanUrl || current.penghargaanUrl === LEGACY_SEEDED_PENGHARGAAN_URL) {
     patch.penghargaanUrl = DEFAULT_SETTINGS.penghargaanUrl;
   }
 
@@ -314,7 +362,8 @@ async function getSettingsRow(): Promise<DashboardSettingsRecord> {
 export async function GET() {
   try {
     const row = await getSettingsRow();
-    const parsedScores = normalizeGcgScores(JSON.parse(row.gcgScoresJson));
+    const parsedMeta = parseDashboardMeta(row.gcgScoresJson);
+    const parsedScores = parsedMeta.gcgScores;
     const penghargaanUrls = parsePenghargaanUrls(row.penghargaanUrl);
     const regulasiOrder = normalizeRegulasiOrder(row.regulasiOrder);
     const softstructureOrder = normalizeSoftstructureOrder(row.softstructureOrder);
@@ -336,6 +385,7 @@ export async function GET() {
       softstructureOrder,
       kajianOrder,
       gcgScores: parsedScores,
+      riskProfileSourceName: parsedMeta.riskProfileSourceName,
     });
   } catch (error) {
     console.error("Failed to load dashboard settings", error);
@@ -419,7 +469,13 @@ export async function PUT(req: NextRequest) {
     const serializedRegulasiOrder = serializeRegulasiOrder(regulasiOrder);
     const serializedSoftstructureOrder = serializeSoftstructureOrder(softstructureOrder);
     const serializedKajianOrder = serializeKajianOrder(kajianOrder);
-    const gcgScores = normalizeGcgScores(body.gcgScores);
+    const existingMeta = parseDashboardMeta(existingRow.gcgScoresJson);
+    const gcgScores = body.gcgScores === undefined
+      ? existingMeta.gcgScores
+      : normalizeGcgScores(body.gcgScores);
+    const riskProfileSourceName = body.riskProfileSourceName === undefined
+      ? existingMeta.riskProfileSourceName
+      : String(body.riskProfileSourceName ?? "").trim();
 
     await ensureDashboardSettingsRow();
     await prisma.dashboardSettings.update({
@@ -435,7 +491,10 @@ export async function PUT(req: NextRequest) {
         regulasiOrder: serializedRegulasiOrder,
         softstructureOrder: serializedSoftstructureOrder,
         kajianOrder: serializedKajianOrder,
-        gcgScoresJson: JSON.stringify(gcgScores),
+        gcgScoresJson: serializeDashboardMeta({
+          gcgScores,
+          riskProfileSourceName,
+        }),
       },
     });
 

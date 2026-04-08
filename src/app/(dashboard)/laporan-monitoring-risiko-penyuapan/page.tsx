@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getExcelStats, formatExcelValue, getCategoryFileSummary } from "@/lib/excel";
+import { getExcelStats, getCategoryFileSummary } from "@/lib/excel";
+import PelaporanExcelTablePanel from "@/components/features/laporan/PelaporanExcelTablePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -57,23 +58,10 @@ export default async function LaporanMonitoringRisikoPenyuapanPage() {
                 </div>
             )}
 
-            <div className="row">
-                {[
-                    { title: "Total Risiko Terpantau", value: formatExcelValue(stats[0] || 0), desc: "Risiko penyuapan yang diidentifikasi", border: "#e2e8f0", bg: "#f8fafc", color: "#1e293b" },
-                    { title: "Risiko High Priority", value: formatExcelValue(stats[1] || 0), desc: "Membutuhkan mitigasi segera", border: "#fecaca", bg: "#fef2f2", color: "#dc2626" },
-                    { title: "Mitigasi Selesai", value: formatExcelValue(stats[2] || 0), desc: "Risiko berhasil dikendalikan", border: "#bbf7d0", bg: "#f0fdf4", color: "#16a34a" },
-                ].map((item, idx) => (
-                    <div key={idx} className="col-md-4 grid-margin stretch-card">
-                        <div className="card shadow-sm" style={{ borderRadius: 10, border: `1px solid ${item.border}`, backgroundColor: item.bg }}>
-                            <div className="card-body">
-                                <p className="card-title text-muted mb-1" style={{ fontSize: "0.85rem", fontWeight: 700, textTransform: "uppercase" }}>{item.title}</p>
-                                <h2 className="mb-1" style={{ color: item.color, fontWeight: 800 }}>{item.value}</h2>
-                                <small style={{ color: "#64748b", fontWeight: 500 }}>{item.desc}</small>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
+            <PelaporanExcelTablePanel
+                category="pelaporan_penyuapan"
+                title="Tabel Monitoring Risiko Sesuai Excel"
+            />
         </>
     );
 }

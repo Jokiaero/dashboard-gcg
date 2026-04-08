@@ -19,8 +19,6 @@ type DocFile = {
 
 type ViewMode = "active" | "recycle";
 
-type CrudMode = "create" | "update" | "delete";
-
 type Category = {
     id: string;
     label: string;
@@ -28,14 +26,6 @@ type Category = {
     color: string;
     bg: string;
     desc: string;
-};
-
-type CrudModeOption = {
-    id: CrudMode;
-    label: string;
-    desc: string;
-    color: string;
-    bg: string;
 };
 
 type DashboardSettingsPayload = {
@@ -50,7 +40,15 @@ type DashboardSettingsPayload = {
     regulasiOrder?: string[];
     softstructureOrder?: string[];
     kajianOrder?: string[];
+    riskProfileSourceName?: string;
     gcgScores: Array<{ year: string; value: number }>;
+};
+
+type UploadApiResponse = {
+    name?: string;
+    category?: string;
+    requestedCategory?: string;
+    categoryAdjusted?: boolean;
 };
 
 const EMPTY_DOC_FILES: DocFile[] = [];
@@ -68,36 +66,11 @@ const CATEGORIES: Category[] = [
     { id: "approval_kepatuhan", label: "Approval Kepatuhan", icon: "icon-check", color: "#0f766e", bg: "#ccfbf1", desc: "Data approval pernyataan kepatuhan" },
     { id: "kajian",       label: "Kajian",          icon: "icon-search",    color: "#059669", bg: "#d1fae5", desc: "Dokumen Kajian Internal" },
     { id: "penghargaan",  label: "Berita GCG",      icon: "icon-head",      color: "#b45309", bg: "#fef3c7", desc: "Arsip Berita dan Dokumentasi GCG" },
-    { id: "documents",    label: "Dokumen Umum",    icon: "icon-paper",     color: "#b45309", bg: "#fef3c7", desc: "Dokumen & Berkas Lainnya" },
 ];
 
 const DEFAULT_REGULASI_ORDER = [...REGULASI_DEFAULT_ORDER_FILE_NAMES];
 const DEFAULT_SOFTSTRUCTURE_ORDER = [...SOFTSTRUCTURE_DEFAULT_ORDER_FILE_NAMES];
 const DEFAULT_KAJIAN_ORDER = [...KAJIAN_DEFAULT_ORDER_FILE_NAMES];
-
-const CRUD_MODE_OPTIONS: CrudModeOption[] = [
-    {
-        id: "create",
-        label: "Create",
-        desc: "Tambah dokumen baru ke kategori terpilih",
-        color: "#166534",
-        bg: "#dcfce7",
-    },
-    {
-        id: "update",
-        label: "Update",
-        desc: "Perbarui file lama berdasarkan nama target",
-        color: "#1d4ed8",
-        bg: "#dbeafe",
-    },
-    {
-        id: "delete",
-        label: "Delete",
-        desc: "Pindahkan file aktif ke recycle",
-        color: "#b91c1c",
-        bg: "#fee2e2",
-    },
-];
 
 function normalizeRegulasiOrder(order: unknown): string[] {
     const input = Array.isArray(order) ? order : [];
@@ -209,6 +182,17 @@ function areStringArraysEqual(left: string[], right: string[]): boolean {
     return true;
 }
 
+function reorderItems(items: string[], fromIndex: number, toIndex: number): string[] {
+    if (fromIndex === toIndex) {
+        return [...items];
+    }
+
+    const next = [...items];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    return next;
+}
+
 function toDisplayTitleFromFileName(fileName: string): string {
     const decoded = decodeURIComponent(String(fileName || ""));
     return decoded
@@ -240,12 +224,39 @@ function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function buildReaderHref(fileUrl: string, fileName: string): string {
+    const params = new URLSearchParams({
+        file: String(fileUrl || ""),
+        name: String(fileName || ""),
+    });
+    return `/file-reader?${params.toString()}`;
+}
+
+function isExcelFileName(fileName: string): boolean {
+    const lower = String(fileName || "").toLowerCase();
+    return lower.endsWith(".xlsx") || lower.endsWith(".xls");
+}
+
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error) {
         return error.message;
     }
 
     return "Terjadi kesalahan yang tidak diketahui";
+}
+
+function getCategoryLabelById(categoryId: string): string {
+    return CATEGORIES.find((item) => item.id === categoryId)?.label || categoryId;
+}
+
+function buildAutoCategoryNotice(rows: Array<{ to: string }>): string {
+    if (rows.length === 0) {
+        return "";
+    }
+
+    const uniqueDestinations = Array.from(new Set(rows.map((row) => row.to)));
+    const destinationLabels = uniqueDestinations.map(getCategoryLabelById);
+    return ` Kategori otomatis disesuaikan ke: ${destinationLabels.join(", ")}.`;
 }
 
 function CoverOrderList({
@@ -255,6 +266,9 @@ function CoverOrderList({
     titleColor,
     items,
     getLabel,
+    onReorder,
+    disabled,
+    isSaving,
 }: {
     title: string;
     borderColor: string;
@@ -262,7 +276,30 @@ function CoverOrderList({
     titleColor: string;
     items: string[];
     getLabel: (fileName: string) => string;
+    onReorder?: (nextOrder: string[]) => void;
+    disabled?: boolean;
+    isSaving?: boolean;
 }) {
+    const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+    const [overIndex, setOverIndex] = useState<number | null>(null);
+
+    const isDragDisabled = Boolean(disabled || !onReorder);
+
+    const handleDropAt = (targetIndex: number) => {
+        if (isDragDisabled || draggedIndex === null) {
+            return;
+        }
+
+        const nextOrder = reorderItems(items, draggedIndex, targetIndex);
+        const changed = !areStringArraysEqual(items, nextOrder);
+        setDraggedIndex(null);
+        setOverIndex(null);
+
+        if (changed) {
+            onReorder?.(nextOrder);
+        }
+    };
+
     return (
         <div
             style={{
@@ -273,7 +310,20 @@ function CoverOrderList({
                 backgroundColor: bg,
             }}
         >
-            <div style={{ fontSize: 12, fontWeight: 700, color: titleColor, marginBottom: 8 }}>{title}</div>
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                    marginBottom: 8,
+                }}
+            >
+                <div style={{ fontSize: 12, fontWeight: 700, color: titleColor }}>{title}</div>
+                <div style={{ fontSize: 10, color: "#64748b" }}>
+                    {isSaving ? "Menyimpan urutan..." : isDragDisabled ? "Drag tidak aktif" : "Drag item untuk ubah urutan"}
+                </div>
+            </div>
             {items.length === 0 ? (
                 <div style={{ fontSize: 11, color: "#64748b" }}>Belum ada file aktif untuk ditampilkan pada urutan katalog.</div>
             ) : (
@@ -281,16 +331,58 @@ function CoverOrderList({
                     {items.map((fileName, index) => (
                         <div
                             key={`${title}-${fileName}`}
+                            draggable={!isDragDisabled}
+                            onDragStart={(event) => {
+                                if (isDragDisabled) {
+                                    return;
+                                }
+                                setDraggedIndex(index);
+                                setOverIndex(index);
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData("text/plain", fileName);
+                            }}
+                            onDragOver={(event) => {
+                                if (isDragDisabled) {
+                                    return;
+                                }
+                                event.preventDefault();
+                                event.stopPropagation();
+                                event.dataTransfer.dropEffect = "move";
+                                if (overIndex !== index) {
+                                    setOverIndex(index);
+                                }
+                            }}
+                            onDrop={(event) => {
+                                if (isDragDisabled) {
+                                    return;
+                                }
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleDropAt(index);
+                            }}
+                            onDragEnd={() => {
+                                setDraggedIndex(null);
+                                setOverIndex(null);
+                            }}
                             style={{
                                 display: "flex",
                                 alignItems: "center",
                                 gap: 8,
-                                backgroundColor: "#fff",
-                                border: "1px solid #e2e8f0",
+                                backgroundColor: draggedIndex === index ? "#f8fafc" : "#fff",
+                                border:
+                                    overIndex === index && draggedIndex !== null && draggedIndex !== index
+                                        ? `1px dashed ${titleColor}`
+                                        : "1px solid #e2e8f0",
                                 borderRadius: 7,
                                 padding: "7px 9px",
+                                cursor: isDragDisabled ? "default" : "grab",
+                                opacity: draggedIndex === index ? 0.62 : 1,
+                                transition: "border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease",
                             }}
                         >
+                            <div style={{ fontSize: 13, color: "#94a3b8", userSelect: "none" }}>
+                                <i className="icon-menu"></i>
+                            </div>
                             <div style={{ fontSize: 12, color: "#1e293b", fontWeight: 600 }}>
                                 {index + 1}. {getLabel(fileName)}
                             </div>
@@ -306,14 +398,15 @@ function CoverOrderList({
 export default function AdminContentPanel() {
     const [activeCategory, setActiveCategory] = useState<string>("regulasi");
     const [viewMode, setViewMode] = useState<ViewMode>("active");
-    const [crudMode, setCrudMode] = useState<CrudMode>("create");
     const [uploadTargetName, setUploadTargetName] = useState("");
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [uploadingTotal, setUploadingTotal] = useState(0);
     const [uploadStatus, setUploadStatus] = useState<{ ok: boolean; msg: string } | null>(null);
     const [regulasiOrderDraft, setRegulasiOrderDraft] = useState<string[]>(DEFAULT_REGULASI_ORDER);
     const [softstructureOrderDraft, setSoftstructureOrderDraft] = useState<string[]>(DEFAULT_SOFTSTRUCTURE_ORDER);
     const [kajianOrderDraft, setKajianOrderDraft] = useState<string[]>(DEFAULT_KAJIAN_ORDER);
+    const [riskProfileSourceDraft, setRiskProfileSourceDraft] = useState("");
     const [confirmDelete, setConfirmDelete] = useState<DocFile | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const queryClient = useQueryClient();
@@ -322,6 +415,7 @@ export default function AdminContentPanel() {
     const isRegulasiCategory = activeCategory === "regulasi";
     const isSoftstructureCategory = activeCategory === "softstructure";
     const isKajianCategory = activeCategory === "kajian";
+    const isRiskProfileCategory = activeCategory === "pelaporan_risiko";
     const isPenghargaanCategory = activeCategory === "penghargaan";
     const isPelaporanCategory = [
         "pelaporan_wbs",
@@ -340,7 +434,6 @@ export default function AdminContentPanel() {
         "approval_kepatuhan",
         "assessment",
     ].includes(activeCategory);
-    const activeCrudMode = CRUD_MODE_OPTIONS.find((mode) => mode.id === crudMode)!;
 
     const { data: dashboardSettings } = useQuery<DashboardSettingsPayload>({
         queryKey: ["dashboardSettingsAdminContentPenghargaan"],
@@ -356,7 +449,7 @@ export default function AdminContentPanel() {
     });
 
     // ── Fetch files ──────────────────────────────────────────────────────────
-    const { data, isLoading, refetch } = useQuery<{ files: DocFile[] }>({
+    const { data, isLoading } = useQuery<{ files: DocFile[] }>({
         queryKey: ["adminDocs", activeCategory, viewMode],
         queryFn: async () => {
             const res = await fetch(`/api/admin/documents?category=${activeCategory}&deleted=${viewMode === "recycle" ? "1" : "0"}`);
@@ -366,6 +459,9 @@ export default function AdminContentPanel() {
     });
 
     const files = data?.files ?? EMPTY_DOC_FILES;
+    const riskProfileExcelFiles = isRiskProfileCategory && viewMode === "active"
+        ? files.filter((file) => isExcelFileName(file.name))
+        : EMPTY_DOC_FILES;
 
     const invalidateCategoryLists = () => {
         queryClient.invalidateQueries({ queryKey: ["adminDocs", activeCategory, "active"] });
@@ -399,6 +495,7 @@ export default function AdminContentPanel() {
         overrideRegulasiOrder?: string[];
         overrideSoftstructureOrder?: string[];
         overrideKajianOrder?: string[];
+        overrideRiskProfileSourceName?: string;
     }): DashboardSettingsPayload => {
         if (!dashboardSettings) {
             throw new Error("Pengaturan dashboard belum siap");
@@ -420,6 +517,9 @@ export default function AdminContentPanel() {
         const finalKajianOrder = normalizeKajianOrder(
             Array.isArray(options?.overrideKajianOrder) ? options?.overrideKajianOrder : kajianOrderDraft
         );
+        const finalRiskProfileSourceName = String(
+            options?.overrideRiskProfileSourceName ?? dashboardSettings.riskProfileSourceName ?? ""
+        ).trim();
 
         return {
             dashboardTitle: dashboardSettings.dashboardTitle,
@@ -433,6 +533,7 @@ export default function AdminContentPanel() {
             regulasiOrder: finalRegulasiOrder,
             softstructureOrder: finalSoftstructureOrder,
             kajianOrder: finalKajianOrder,
+            riskProfileSourceName: finalRiskProfileSourceName,
             gcgScores: Array.isArray(dashboardSettings.gcgScores) ? dashboardSettings.gcgScores : [],
         };
     };
@@ -451,6 +552,21 @@ export default function AdminContentPanel() {
         const fromSettings = normalizeKajianOrder(dashboardSettings?.kajianOrder);
         setKajianOrderDraft(fromSettings.length > 0 ? fromSettings : [...DEFAULT_KAJIAN_ORDER]);
     }, [dashboardSettings?.kajianOrder]);
+
+    useEffect(() => {
+        setRiskProfileSourceDraft(String(dashboardSettings?.riskProfileSourceName || "").trim());
+    }, [dashboardSettings?.riskProfileSourceName]);
+
+    useEffect(() => {
+        if (!isRiskProfileCategory || viewMode !== "active") {
+            return;
+        }
+
+        const hasCurrent = riskProfileExcelFiles.some((file) => file.name === riskProfileSourceDraft);
+        if (!hasCurrent) {
+            setRiskProfileSourceDraft(riskProfileExcelFiles[0]?.name || "");
+        }
+    }, [isRiskProfileCategory, riskProfileExcelFiles, riskProfileSourceDraft, viewMode]);
 
     useEffect(() => {
         if (!isRegulasiCategory || viewMode !== "active") {
@@ -509,6 +625,7 @@ export default function AdminContentPanel() {
                 setRegulasiOrderDraft(data.syncedOrder);
             }
             invalidateRegulasiPublicData();
+            setUploadStatus({ ok: true, msg: "✓ Urutan cover regulasi berhasil diperbarui." });
         },
         onError: (error: unknown) => {
             setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(error)}` });
@@ -536,6 +653,7 @@ export default function AdminContentPanel() {
                 setSoftstructureOrderDraft(data.syncedOrder);
             }
             invalidateSoftstructurePublicData();
+            setUploadStatus({ ok: true, msg: "✓ Urutan cover softstructure berhasil diperbarui." });
         },
         onError: (error: unknown) => {
             setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(error)}` });
@@ -563,11 +681,69 @@ export default function AdminContentPanel() {
                 setKajianOrderDraft(data.syncedOrder);
             }
             invalidateKajianPublicData();
+            setUploadStatus({ ok: true, msg: "✓ Urutan cover kajian berhasil diperbarui." });
         },
         onError: (error: unknown) => {
             setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(error)}` });
         },
     });
+
+    const saveRiskProfileSourceMutation = useMutation({
+        mutationFn: async (sourceNameInput?: string) => {
+            const sourceName = String(sourceNameInput ?? riskProfileSourceDraft ?? "").trim();
+            const payload = buildDashboardPayload({ overrideRiskProfileSourceName: sourceName });
+            const res = await fetch("/api/dashboard/settings", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Gagal menyimpan sumber data profil risiko");
+            return { json, sourceName };
+        },
+        onSuccess: async (data) => {
+            setRiskProfileSourceDraft(String(data?.sourceName || "").trim());
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["dashboardSettingsAdminContentPenghargaan"] }),
+                queryClient.invalidateQueries({ queryKey: ["dashboardSettings"] }),
+                queryClient.invalidateQueries({ queryKey: ["riskProfileData"] }),
+            ]);
+            setUploadStatus({ ok: true, msg: "✓ Sumber data Laporan Profil Risiko berhasil diperbarui." });
+        },
+        onError: (error: unknown) => {
+            setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(error)}` });
+        },
+    });
+
+    const handleRegulasiOrderReorder = (nextOrder: string[]) => {
+        if (!dashboardSettings) {
+            return;
+        }
+
+        const syncedOrder = syncRegulasiOrderWithActiveFiles(nextOrder, files.map((file) => file.name));
+        setRegulasiOrderDraft(syncedOrder);
+        saveRegulasiOrderMutation.mutate(syncedOrder);
+    };
+
+    const handleSoftstructureOrderReorder = (nextOrder: string[]) => {
+        if (!dashboardSettings) {
+            return;
+        }
+
+        const syncedOrder = syncSoftstructureOrderWithActiveFiles(nextOrder, files.map((file) => file.name));
+        setSoftstructureOrderDraft(syncedOrder);
+        saveSoftstructureOrderMutation.mutate(syncedOrder);
+    };
+
+    const handleKajianOrderReorder = (nextOrder: string[]) => {
+        if (!dashboardSettings) {
+            return;
+        }
+
+        const syncedOrder = syncKajianOrderWithActiveFiles(nextOrder, files.map((file) => file.name));
+        setKajianOrderDraft(syncedOrder);
+        saveKajianOrderMutation.mutate(syncedOrder);
+    };
 
     // ── Delete ───────────────────────────────────────────────────────────────
     const deleteMutation = useMutation({
@@ -589,99 +765,174 @@ export default function AdminContentPanel() {
             if (file.category === "kajian") {
                 invalidateKajianPublicData();
             }
+            if (file.category === "pelaporan_risiko") {
+                queryClient.invalidateQueries({ queryKey: ["riskProfileData"] });
+            }
         },
     });
 
+    const handleQuickUpdate = (file: DocFile) => {
+        setUploadTargetName(file.name);
+        setViewMode("active");
+        setUploadStatus({ ok: true, msg: `✓ Update siap untuk file "${file.name}". Pilih file pengganti.` });
+        fileInputRef.current?.click();
+    };
+
+    async function uploadSingleFile(file: File, category: string, targetName?: string): Promise<UploadApiResponse> {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("category", category);
+        if (targetName) {
+            form.append("targetName", targetName);
+        }
+
+        const res = await fetch("/api/admin/upload", { method: "POST", body: form });
+        const json = await res.json();
+        if (!res.ok) {
+            throw new Error(json.error || "Upload gagal");
+        }
+        return json as UploadApiResponse;
+    }
+
     // ── Upload ───────────────────────────────────────────────────────────────
-    const handleUpload = async (file: File) => {
-        if (crudMode === "delete") {
-            setUploadStatus({ ok: false, msg: "✗ Mode Delete tidak menerima upload. Gunakan tombol Pindahkan pada daftar file." });
+    const handleUpload = async (selectedFiles: File[]) => {
+        if (selectedFiles.length === 0) {
             return;
         }
 
-        if (crudMode === "update" && !uploadTargetName.trim()) {
-            setUploadStatus({ ok: false, msg: "✗ Mode Update mewajibkan Nama File Target." });
+        const targetName = uploadTargetName.trim();
+        const isUpdate = Boolean(targetName);
+
+        if (isUpdate && selectedFiles.length > 1) {
+            setUploadStatus({ ok: false, msg: "✗ Mode update hanya bisa untuk 1 file. Hapus Nama File Target jika ingin upload banyak file sekaligus." });
             return;
         }
 
         setUploading(true);
+        setUploadingTotal(selectedFiles.length);
         setUploadStatus(null);
 
-        const form = new FormData();
-        form.append("file", file);
-        form.append("category", activeCategory);
-        if (uploadTargetName.trim()) {
-            form.append("targetName", uploadTargetName.trim());
-        }
+        const uploadedNames: string[] = [];
+        const failedUploads: Array<{ name: string; error: string }> = [];
+        const adjustedCategories: Array<{ from: string; to: string }> = [];
 
         try {
-            const res = await fetch("/api/admin/upload", { method: "POST", body: form });
-            const json = await res.json();
-            if (!res.ok) throw new Error(json.error || "Upload gagal");
-            setUploadStatus({
-                ok: true,
-                msg: crudMode === "create"
-                    ? `✓ Create berhasil. File "${json.name}" telah ditambahkan.`
-                    : `✓ Update berhasil. File "${json.name}" telah diperbarui.`,
-            });
-            setUploadTargetName("");
-            setViewMode("active");
-            invalidateCategoryLists();
-            if (activeCategory === "regulasi") {
-                const uploadedName = String(json?.name || "").trim();
-                if (uploadedName && dashboardSettings) {
+            for (const file of selectedFiles) {
+                try {
+                    const json = await uploadSingleFile(file, activeCategory, targetName || undefined);
+                    const uploadedName = String(json?.name || "").trim();
+                    if (uploadedName) {
+                        uploadedNames.push(uploadedName);
+                    }
+
+                    const requestedCategory = String(json?.requestedCategory || activeCategory || "").trim();
+                    const resolvedCategory = String(json?.category || activeCategory || "").trim();
+                    if (json?.categoryAdjusted && requestedCategory && resolvedCategory && requestedCategory !== resolvedCategory) {
+                        adjustedCategories.push({ from: requestedCategory, to: resolvedCategory });
+                    }
+                } catch (error: unknown) {
+                    failedUploads.push({
+                        name: file.name,
+                        error: getErrorMessage(error),
+                    });
+                }
+            }
+
+            if (uploadedNames.length > 0) {
+                setUploadTargetName("");
+                setViewMode("active");
+                invalidateCategoryLists();
+
+                Array.from(new Set(adjustedCategories.map((row) => row.to))).forEach((categoryId) => {
+                    queryClient.invalidateQueries({ queryKey: ["adminDocs", categoryId, "active"] });
+                    queryClient.invalidateQueries({ queryKey: ["adminDocs", categoryId, "recycle"] });
+                });
+
+                const mergedActiveNames = [...files.map((item) => item.name), ...uploadedNames];
+
+                if (activeCategory === "regulasi" && dashboardSettings) {
                     const syncedOrder = syncRegulasiOrderWithActiveFiles(
-                        [...regulasiOrderDraft, uploadedName],
-                        [...files.map((item) => item.name), uploadedName]
+                        [...regulasiOrderDraft, ...uploadedNames],
+                        mergedActiveNames
                     );
                     setRegulasiOrderDraft(syncedOrder);
                     saveRegulasiOrderMutation.mutate(syncedOrder);
                 }
-            }
-            if (activeCategory === "softstructure") {
-                const uploadedName = String(json?.name || "").trim();
-                if (uploadedName && dashboardSettings) {
+
+                if (activeCategory === "softstructure" && dashboardSettings) {
                     const syncedOrder = syncSoftstructureOrderWithActiveFiles(
-                        [...softstructureOrderDraft, uploadedName],
-                        [...files.map((item) => item.name), uploadedName]
+                        [...softstructureOrderDraft, ...uploadedNames],
+                        mergedActiveNames
                     );
                     setSoftstructureOrderDraft(syncedOrder);
                     saveSoftstructureOrderMutation.mutate(syncedOrder);
                 }
-            }
-            if (activeCategory === "kajian") {
-                const uploadedName = String(json?.name || "").trim();
-                if (uploadedName && dashboardSettings) {
+
+                if (activeCategory === "kajian" && dashboardSettings) {
                     const syncedOrder = syncKajianOrderWithActiveFiles(
-                        [...kajianOrderDraft, uploadedName],
-                        [...files.map((item) => item.name), uploadedName]
+                        [...kajianOrderDraft, ...uploadedNames],
+                        mergedActiveNames
                     );
                     setKajianOrderDraft(syncedOrder);
                     saveKajianOrderMutation.mutate(syncedOrder);
                 }
-                invalidateKajianPublicData();
+
+                if (activeCategory === "kajian") {
+                    invalidateKajianPublicData();
+                }
+                if (activeCategory === "penghargaan") {
+                    invalidatePenghargaanPublicData();
+                }
+                if (activeCategory === "pelaporan_risiko") {
+                    queryClient.invalidateQueries({ queryKey: ["riskProfileData"] });
+                }
             }
-            if (activeCategory === "penghargaan") {
-                invalidatePenghargaanPublicData();
+
+            if (failedUploads.length === 0) {
+                const autoCategoryNotice = buildAutoCategoryNotice(adjustedCategories);
+                if (isUpdate) {
+                    const updatedName = uploadedNames[0] || selectedFiles[0]?.name || "file";
+                    setUploadStatus({ ok: true, msg: `✓ Update berhasil. File "${updatedName}" telah diperbarui.${autoCategoryNotice}` });
+                } else if (uploadedNames.length === 1) {
+                    setUploadStatus({ ok: true, msg: `✓ Create berhasil. File "${uploadedNames[0]}" telah ditambahkan.${autoCategoryNotice}` });
+                } else {
+                    setUploadStatus({ ok: true, msg: `✓ Upload batch berhasil. ${uploadedNames.length} file ditambahkan.${autoCategoryNotice}` });
+                }
+            } else if (uploadedNames.length > 0) {
+                const failedPreview = failedUploads.slice(0, 2).map((row) => row.name).join(", ");
+                const suffix = failedUploads.length > 2 ? ` dan ${failedUploads.length - 2} file lainnya` : "";
+                const autoCategoryNotice = buildAutoCategoryNotice(adjustedCategories);
+                setUploadStatus({
+                    ok: false,
+                    msg: `✗ Upload batch selesai sebagian: ${uploadedNames.length} sukses, ${failedUploads.length} gagal (${failedPreview}${suffix}).${autoCategoryNotice}`,
+                });
+            } else {
+                const firstError = failedUploads[0]?.error || "Upload gagal";
+                setUploadStatus({ ok: false, msg: `✗ Semua upload gagal. ${firstError}` });
             }
         } catch (error: unknown) {
             setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(error)}` });
         } finally {
             setUploading(false);
+            setUploadingTotal(0);
         }
     };
 
     const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const f = e.target.files?.[0];
-        if (f) handleUpload(f);
+        const pickedFiles = Array.from(e.target.files ?? []);
+        if (pickedFiles.length > 0) {
+            void handleUpload(pickedFiles);
+        }
         e.target.value = "";
     };
 
     const onDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) handleUpload(f);
+        const droppedFiles = Array.from(e.dataTransfer.files ?? []);
+        if (droppedFiles.length > 0) {
+            void handleUpload(droppedFiles);
+        }
     };
 
     const onDragOver = (e: React.DragEvent) => {
@@ -695,13 +946,11 @@ export default function AdminContentPanel() {
             ? ".pdf,.xlsx,.xls"
             : ".pdf,.png,.jpg,.jpeg,.xlsx,.xls";
 
-    const uploadTargetPlaceholder = crudMode === "update"
-        ? "contoh: laporan-wbs-2026.xlsx"
-        : isRegulasiCategory
-            ? "contoh: peraturan-baru-2026"
-            : isPelaporanCategory
-                ? "contoh: laporan-wbs-2026 (tanpa ekstensi)"
-                : "contoh: sertifikat-iso-2025 (tanpa ekstensi)";
+    const uploadTargetPlaceholder = isRegulasiCategory
+        ? "contoh: peraturan-baru-2026 (isi jika update file lama)"
+        : isPelaporanCategory
+            ? "contoh: laporan-wbs-2026.xlsx (isi jika update file lama)"
+            : "contoh: sertifikat-iso-2025 (isi jika update file lama)";
 
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -812,210 +1061,173 @@ export default function AdminContentPanel() {
                 <div className="col-lg-9">
                     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-                        {/* Operation Mode */}
-                        <div className="card shadow-sm" style={{ borderRadius: 8 }}>
-                            <div className="card-body p-3">
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-                                    <div>
-                                        <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Operasi Data Dokumen</div>
-                                        <div style={{ fontSize: 11, color: "#64748b" }}>
-                                            Gunakan mode create, update, atau delete dalam satu panel kerja.
-                                        </div>
-                                    </div>
-                                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => refetch()}
-                                            style={{
-                                                fontSize: 11,
-                                                color: activeCat.color,
-                                                fontWeight: 700,
-                                                border: "1px solid #cbd5e1",
-                                                borderRadius: 999,
-                                                backgroundColor: "#fff",
-                                                padding: "4px 10px",
-                                                cursor: "pointer",
-                                            }}
-                                        >
-                                            Muat Ulang
-                                        </button>
-                                        <Link
-                                            href="/admin/recycle"
-                                            style={{
-                                                fontSize: 11,
-                                                color: "#334155",
-                                                fontWeight: 700,
-                                                border: "1px solid #cbd5e1",
-                                                backgroundColor: "#fff",
-                                                borderRadius: 999,
-                                                padding: "4px 10px",
-                                                textDecoration: "none",
-                                            }}
-                                        >
-                                            Kelola Recycle
-                                        </Link>
-                                    </div>
-                                </div>
-                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                    {CRUD_MODE_OPTIONS.map((mode) => (
-                                        <button
-                                            key={mode.id}
-                                            type="button"
-                                            onClick={() => {
-                                                setCrudMode(mode.id);
-                                                setUploadStatus(null);
-                                                setUploadTargetName("");
-                                            }}
-                                            style={{
-                                                border: crudMode === mode.id ? `1px solid ${mode.color}` : "1px solid #e2e8f0",
-                                                backgroundColor: crudMode === mode.id ? mode.bg : "#fff",
-                                                color: crudMode === mode.id ? mode.color : "#334155",
-                                                borderRadius: 8,
-                                                padding: "8px 12px",
-                                                minWidth: 180,
-                                                textAlign: "left",
-                                                cursor: "pointer",
-                                            }}
-                                        >
-                                            <div style={{ fontSize: 12, fontWeight: 700 }}>{mode.label}</div>
-                                            <div style={{ fontSize: 10, marginTop: 2 }}>{mode.desc}</div>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
                         {/* Upload Zone */}
                         <div className="card shadow-sm" style={{ borderRadius: 8 }}>
                             <div className="card-body p-4">
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>
-                                    Operasi {activeCrudMode.label} pada Kategori:{" "}
-                                    <span style={{ color: activeCat.color }}>{activeCat.label}</span>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+                                        Upload / Update pada Kategori: <span style={{ color: activeCat.color }}>{activeCat.label}</span>
+                                    </div>
                                 </div>
-                                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>{activeCrudMode.desc}</div>
+                                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>
+                                    Isi Nama File Target jika ingin update file lama. Kosongkan jika ingin create file baru.
+                                </div>
 
-                                {crudMode !== "delete" && (
-                                    <>
-                                        <div style={{ marginBottom: 12 }}>
-                                            <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>
-                                                {crudMode === "update"
-                                                    ? "Nama File Target (wajib untuk update)"
-                                                    : "Nama File (opsional - kosongkan untuk pakai nama asli)"}
-                                            </label>
-                                            <input
-                                                type="text"
-                                                className="form-control form-control-sm"
-                                                placeholder={uploadTargetPlaceholder}
-                                                value={uploadTargetName}
-                                                onChange={(e) => setUploadTargetName(e.target.value)}
-                                                style={{ maxWidth: 520, borderRadius: 6 }}
-                                            />
-                                        </div>
+                                <div style={{ marginBottom: 12 }}>
+                                    <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b", display: "block", marginBottom: 4 }}>
+                                        Nama File Target (opsional untuk update)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        className="form-control form-control-sm"
+                                        placeholder={uploadTargetPlaceholder}
+                                        value={uploadTargetName}
+                                        onChange={(e) => setUploadTargetName(e.target.value)}
+                                        style={{ maxWidth: 520, borderRadius: 6 }}
+                                    />
+                                </div>
 
-                                        <div
-                                            onDrop={onDrop}
-                                            onDragOver={onDragOver}
-                                            onDragLeave={onDragLeave}
-                                            onClick={() => fileInputRef.current?.click()}
-                                            style={{
-                                                border: `2px dashed ${isDragging ? activeCat.color : "#cbd5e1"}`,
-                                                borderRadius: 10,
-                                                padding: "32px 24px",
-                                                textAlign: "center",
-                                                backgroundColor: isDragging ? activeCat.bg : "#f8fafc",
-                                                cursor: uploading ? "not-allowed" : "pointer",
-                                                transition: "all 0.2s",
-                                                opacity: uploading ? 0.6 : 1,
-                                            }}
-                                        >
-                                            {uploading ? (
-                                                <div>
-                                                    <div className="spinner-border spinner-border-sm mb-2" style={{ color: activeCat.color }}></div>
-                                                    <div style={{ fontSize: 13, color: "#64748b" }}>
-                                                        {crudMode === "create" ? "Memproses create..." : "Memproses update..."}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <i className="ti-cloud-up" style={{ fontSize: 32, color: activeCat.color, display: "block", marginBottom: 8 }}></i>
-                                                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>
-                                                        Drag & drop file di sini
-                                                    </div>
-                                                    <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-                                                        {isRegulasiCategory
-                                                            ? "atau klik untuk pilih file • PDF • Maks 20MB"
-                                                            : isPelaporanCategory
-                                                                ? "atau klik untuk pilih file • PDF, XLSX • Maks 20MB"
-                                                                : "atau klik untuk pilih file • PDF, PNG, JPG, XLSX • Maks 20MB"}
-                                                    </div>
-                                                </>
-                                            )}
-                                            <input ref={fileInputRef} type="file" style={{ display: "none" }} accept={acceptedExtensions} onChange={onFileChange} />
+                                <div
+                                    onDrop={onDrop}
+                                    onDragOver={onDragOver}
+                                    onDragLeave={onDragLeave}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    style={{
+                                        border: `2px dashed ${isDragging ? activeCat.color : "#cbd5e1"}`,
+                                        borderRadius: 10,
+                                        padding: "32px 24px",
+                                        textAlign: "center",
+                                        backgroundColor: isDragging ? activeCat.bg : "#f8fafc",
+                                        cursor: uploading ? "not-allowed" : "pointer",
+                                        transition: "all 0.2s",
+                                        opacity: uploading ? 0.6 : 1,
+                                    }}
+                                >
+                                    {uploading ? (
+                                        <div>
+                                            <div className="spinner-border spinner-border-sm mb-2" style={{ color: activeCat.color }}></div>
+                                            <div style={{ fontSize: 13, color: "#64748b" }}>
+                                                {uploadingTotal > 1 ? `Memproses ${uploadingTotal} file...` : "Memproses upload..."}
+                                            </div>
                                         </div>
-                                        <div style={{ marginTop: 10 }}>
-                                            <button
-                                                type="button"
-                                                onClick={() => fileInputRef.current?.click()}
-                                                disabled={uploading}
-                                                style={{
-                                                    border: `1px solid ${activeCat.color}`,
-                                                    color: activeCat.color,
-                                                    backgroundColor: "#fff",
-                                                    borderRadius: 6,
-                                                    padding: "6px 12px",
-                                                    fontSize: 12,
-                                                    fontWeight: 700,
-                                                    cursor: uploading ? "not-allowed" : "pointer",
-                                                    opacity: uploading ? 0.7 : 1,
-                                                }}
-                                            >
-                                                {crudMode === "create" ? "Pilih File Baru" : "Pilih File Update"}
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
-
-                                {crudMode === "delete" && (
-                                    <div
+                                    ) : (
+                                        <>
+                                            <i className="ti-cloud-up" style={{ fontSize: 32, color: activeCat.color, display: "block", marginBottom: 8 }}></i>
+                                            <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>
+                                                Drag & drop file di sini
+                                            </div>
+                                            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+                                                {uploadTargetName.trim()
+                                                    ? "Mode update: pilih 1 file pengganti"
+                                                    : isRegulasiCategory
+                                                        ? "atau klik untuk pilih 1+ file • PDF • Maks 20MB / file"
+                                                        : isPelaporanCategory
+                                                            ? "atau klik untuk pilih 1+ file • PDF, XLSX • Maks 20MB / file"
+                                                            : "atau klik untuk pilih 1+ file • PDF, PNG, JPG, XLSX • Maks 20MB / file"}
+                                            </div>
+                                        </>
+                                    )}
+                                    <input ref={fileInputRef} type="file" style={{ display: "none" }} accept={acceptedExtensions} multiple={!uploadTargetName.trim()} onChange={onFileChange} />
+                                </div>
+                                <div style={{ marginTop: 10 }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={uploading}
                                         style={{
-                                            marginTop: 2,
-                                            padding: "12px 14px",
-                                            borderRadius: 8,
-                                            border: "1px solid #fecaca",
-                                            backgroundColor: "#fff1f2",
+                                            border: `1px solid ${activeCat.color}`,
+                                            color: activeCat.color,
+                                            backgroundColor: "#fff",
+                                            borderRadius: 6,
+                                            padding: "6px 12px",
+                                            fontSize: 12,
+                                            fontWeight: 700,
+                                            cursor: uploading ? "not-allowed" : "pointer",
+                                            opacity: uploading ? 0.7 : 1,
                                         }}
                                     >
-                                        <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>
-                                            Mode Delete Aktif
-                                        </div>
-                                        <div style={{ fontSize: 11, color: "#7f1d1d" }}>
-                                            Gunakan tombol Pindahkan pada daftar file aktif untuk memindahkan dokumen ke recycle.
-                                        </div>
-                                    </div>
-                                )}
+                                        Pilih File
+                                    </button>
+                                </div>
 
 
-                                {isRegulasiCategory && viewMode === "active" && crudMode !== "delete" && (
+                                {isRegulasiCategory && viewMode === "active" && (
                                     <div style={{ marginTop: 10, fontSize: 11, color: "#64748b" }}>
                                         Upload regulasi akan menambahkan file baru (atau memperbarui jika nama file sama).
                                     </div>
                                 )}
 
-                                {isSoftstructureCategory && viewMode === "active" && crudMode !== "delete" && (
+                                {isSoftstructureCategory && viewMode === "active" && (
                                     <div style={{ marginTop: 10, fontSize: 11, color: "#64748b" }}>
                                         Upload softstructure akan menambahkan file baru (atau memperbarui jika nama file sama).
                                     </div>
                                 )}
 
-                                {isPenghargaanCategory && viewMode === "active" && crudMode !== "delete" && (
+                                {isPenghargaanCategory && viewMode === "active" && (
                                     <div style={{ marginTop: 10, fontSize: 11, color: "#64748b" }}>
                                         Upload berita GCG akan menambahkan file baru (atau memperbarui jika nama file sama).
                                     </div>
                                 )}
 
-                                {needsExcelStatsCategory && viewMode === "active" && crudMode !== "delete" && (
+                                {needsExcelStatsCategory && viewMode === "active" && (
                                     <div style={{ marginTop: 10, fontSize: 11, color: "#0f766e" }}>
                                         Catatan: kartu statistik dan grafik modul ini membaca file Excel (.xlsx/.xls). PDF tetap bisa diarsipkan sebagai dokumen pendukung.
+                                    </div>
+                                )}
+
+                                {isRiskProfileCategory && viewMode === "active" && (
+                                    <div
+                                        style={{
+                                            marginTop: 10,
+                                            padding: "10px 12px",
+                                            borderRadius: 8,
+                                            border: "1px solid #fed7aa",
+                                            backgroundColor: "#fffbeb",
+                                        }}
+                                    >
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
+                                            Sumber Data Halaman Laporan Profil Risiko
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#78350f", marginBottom: 8 }}>
+                                            Pilih file Excel aktif yang akan dipakai pada halaman laporan publik.
+                                        </div>
+                                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                            <select
+                                                className="form-control form-control-sm"
+                                                value={riskProfileSourceDraft}
+                                                onChange={(event) => setRiskProfileSourceDraft(event.target.value)}
+                                                disabled={riskProfileExcelFiles.length === 0 || saveRiskProfileSourceMutation.isPending}
+                                                style={{ minWidth: 320, maxWidth: 620, borderRadius: 6 }}
+                                            >
+                                                {riskProfileExcelFiles.length === 0 ? (
+                                                    <option value="">Belum ada file Excel aktif</option>
+                                                ) : (
+                                                    riskProfileExcelFiles.map((file) => (
+                                                        <option key={file.name} value={file.name}>
+                                                            {file.name} • {formatDate(file.modifiedAt)}
+                                                        </option>
+                                                    ))
+                                                )}
+                                            </select>
+                                            <button
+                                                type="button"
+                                                onClick={() => saveRiskProfileSourceMutation.mutate(riskProfileSourceDraft)}
+                                                disabled={riskProfileExcelFiles.length === 0 || saveRiskProfileSourceMutation.isPending || !dashboardSettings}
+                                                style={{
+                                                    border: "1px solid #d97706",
+                                                    color: "#92400e",
+                                                    backgroundColor: "#fff",
+                                                    borderRadius: 6,
+                                                    padding: "6px 12px",
+                                                    fontSize: 12,
+                                                    fontWeight: 700,
+                                                    cursor: "pointer",
+                                                    opacity: riskProfileExcelFiles.length === 0 || saveRiskProfileSourceMutation.isPending || !dashboardSettings ? 0.7 : 1,
+                                                }}
+                                            >
+                                                {saveRiskProfileSourceMutation.isPending ? "Menyimpan..." : "Simpan Sumber Data"}
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
 
@@ -1027,6 +1239,9 @@ export default function AdminContentPanel() {
                                         titleColor="#3730a3"
                                         items={regulasiOrderDraft}
                                         getLabel={getRegulasiLabelByFileName}
+                                        onReorder={handleRegulasiOrderReorder}
+                                        disabled={!dashboardSettings || saveRegulasiOrderMutation.isPending}
+                                        isSaving={saveRegulasiOrderMutation.isPending}
                                     />
                                 )}
 
@@ -1038,6 +1253,9 @@ export default function AdminContentPanel() {
                                         titleColor="#0f766e"
                                         items={softstructureOrderDraft}
                                         getLabel={getSoftstructureLabelByFileName}
+                                        onReorder={handleSoftstructureOrderReorder}
+                                        disabled={!dashboardSettings || saveSoftstructureOrderMutation.isPending}
+                                        isSaving={saveSoftstructureOrderMutation.isPending}
                                     />
                                 )}
 
@@ -1049,6 +1267,9 @@ export default function AdminContentPanel() {
                                         titleColor="#166534"
                                         items={kajianOrderDraft}
                                         getLabel={getKajianLabelByFileName}
+                                        onReorder={handleKajianOrderReorder}
+                                        disabled={!dashboardSettings || saveKajianOrderMutation.isPending}
+                                        isSaving={saveKajianOrderMutation.isPending}
                                     />
                                 )}
 
@@ -1083,9 +1304,6 @@ export default function AdminContentPanel() {
                                                 ({files.length} file)
                                             </span>
                                         </div>
-                                    </div>
-                                    <div style={{ fontSize: 11, color: activeCrudMode.color, backgroundColor: activeCrudMode.bg, borderRadius: 999, padding: "4px 10px", fontWeight: 700 }}>
-                                        Mode: {activeCrudMode.label}
                                     </div>
                                 </div>
 
@@ -1163,9 +1381,7 @@ export default function AdminContentPanel() {
                                                 {/* Actions */}
                                                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                                                     <a
-                                                        href={file.url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
+                                                        href={buildReaderHref(file.url, file.name)}
                                                         style={{
                                                             padding: "4px 10px",
                                                             borderRadius: 6,
@@ -1178,22 +1394,56 @@ export default function AdminContentPanel() {
                                                             cursor: "pointer",
                                                         }}
                                                     >
-                                                        Lihat
+                                                        Read
                                                     </a>
-                                                    <button
-                                                        onClick={() => setConfirmDelete(file)}
+                                                    <a
+                                                        href={file.url}
+                                                        download={file.name}
                                                         style={{
                                                             padding: "4px 10px",
                                                             borderRadius: 6,
-                                                            border: crudMode === "delete" ? "1px solid #fca5a5" : "1px solid #fed7aa",
-                                                            backgroundColor: crudMode === "delete" ? "#fff1f2" : "#fff",
-                                                            color: crudMode === "delete" ? "#b91c1c" : "#c2410c",
+                                                            border: "1px solid #dbeafe",
+                                                            backgroundColor: "#eff6ff",
+                                                            color: "#1d4ed8",
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            textDecoration: "none",
+                                                            cursor: "pointer",
+                                                        }}
+                                                    >
+                                                        Download
+                                                    </a>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleQuickUpdate(file)}
+                                                        style={{
+                                                            padding: "4px 10px",
+                                                            borderRadius: 6,
+                                                            border: "1px solid #bfdbfe",
+                                                            backgroundColor: "#eff6ff",
+                                                            color: "#1d4ed8",
                                                             fontSize: 11,
                                                             fontWeight: 600,
                                                             cursor: "pointer",
                                                         }}
                                                     >
-                                                        {crudMode === "delete" ? "Delete ke Recycle" : "Pindahkan"}
+                                                        Update
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConfirmDelete(file)}
+                                                        style={{
+                                                            padding: "4px 10px",
+                                                            borderRadius: 6,
+                                                            border: "1px solid #fca5a5",
+                                                            backgroundColor: "#fff1f2",
+                                                            color: "#b91c1c",
+                                                            fontSize: 11,
+                                                            fontWeight: 600,
+                                                            cursor: "pointer",
+                                                        }}
+                                                    >
+                                                        Delete
                                                     </button>
                                                 </div>
                                             </div>
@@ -1220,9 +1470,9 @@ export default function AdminContentPanel() {
                     }}
                 >
                     <div style={{ backgroundColor: "#fff", borderRadius: 12, padding: 28, maxWidth: 420, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>Pindahkan ke Recycle?</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>Delete ke Recycle?</div>
                         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>
-                            File <strong style={{ color: "#c2410c" }}>{confirmDelete.name}</strong> akan dipindahkan ke recycle dan dapat dipulihkan kembali.
+                            File <strong style={{ color: "#c2410c" }}>{confirmDelete.name}</strong> akan dihapus dari daftar aktif dan dipindahkan ke recycle.
                         </div>
                         <div style={{ display: "flex", gap: 10 }}>
                             <button
@@ -1236,7 +1486,7 @@ export default function AdminContentPanel() {
                                 disabled={deleteMutation.isPending}
                                 style={{ flex: 1, padding: "9px 0", borderRadius: 7, border: "none", backgroundColor: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, opacity: deleteMutation.isPending ? 0.7 : 1 }}
                             >
-                                {deleteMutation.isPending ? "Memproses..." : "Ya, Pindahkan"}
+                                {deleteMutation.isPending ? "Memproses..." : "Ya, Delete"}
                             </button>
                         </div>
                     </div>

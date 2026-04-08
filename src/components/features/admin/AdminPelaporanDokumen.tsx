@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 type DocFile = {
@@ -22,6 +22,14 @@ function formatBytes(bytes: number): string {
 
 function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message;
+    }
+
+    return "Terjadi kesalahan yang tidak diketahui";
 }
 
 export default function AdminPelaporanDokumen({ category, title = "Manajemen Dokumen Laporan", onSuccess }: { category: string, title?: string, onSuccess?: () => void }) {
@@ -48,7 +56,7 @@ export default function AdminPelaporanDokumen({ category, title = "Manajemen Dok
     const isAdmin = userSession?.role === "ADMIN";
 
     // Fetch files
-    const { data, isLoading, refetch } = useQuery<{ files: DocFile[] }>({
+    const { data, isLoading } = useQuery<{ files: DocFile[] }>({
         queryKey: ["adminDocs", category, viewMode],
         queryFn: async () => {
             const res = await fetch(`/api/admin/documents?category=${category}&deleted=${viewMode === "recycle" ? "1" : "0"}`);
@@ -131,13 +139,27 @@ export default function AdminPelaporanDokumen({ category, title = "Manajemen Dok
             const res = await fetch("/api/admin/upload", { method: "POST", body: form });
             const json = await res.json();
             if (!res.ok) throw new Error(json.error || "Upload gagal");
-            setUploadStatus({ ok: true, msg: `✓ File "${json.name}" berhasil diupload!` });
+
+            const requestedCategory = String(json?.requestedCategory || category || "").trim();
+            const resolvedCategory = String(json?.category || category || "").trim();
+            const adjustedNotice =
+                Boolean(json?.categoryAdjusted) && requestedCategory && resolvedCategory && requestedCategory !== resolvedCategory
+                    ? ` Kategori otomatis disesuaikan ke "${resolvedCategory}".`
+                    : "";
+
+            setUploadStatus({ ok: true, msg: `✓ File "${json.name}" berhasil diupload!${adjustedNotice}` });
             setUploadTargetName("");
             setViewMode("active");
             invalidateCategoryLists();
+
+            if (adjustedNotice && resolvedCategory !== category) {
+                queryClient.invalidateQueries({ queryKey: ["adminDocs", resolvedCategory, "active"] });
+                queryClient.invalidateQueries({ queryKey: ["adminDocs", resolvedCategory, "recycle"] });
+            }
+
             onSuccess?.();
-        } catch (err: any) {
-            setUploadStatus({ ok: false, msg: `✗ ${err.message}` });
+        } catch (err: unknown) {
+            setUploadStatus({ ok: false, msg: `✗ ${getErrorMessage(err)}` });
         } finally {
             setUploading(false);
         }
@@ -149,12 +171,12 @@ export default function AdminPelaporanDokumen({ category, title = "Manajemen Dok
         e.target.value = "";
     };
 
-    const onDrop = useCallback((e: React.DragEvent) => {
+    const onDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
         const f = e.dataTransfer.files?.[0];
         if (f) handleUpload(f);
-    }, [category, uploadTargetName, isAdmin]);
+    };
 
     const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
     const onDragLeave = () => setIsDragging(false);
