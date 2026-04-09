@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { isAdminRole } from "@/lib/roles";
 
 type PelaporanSourceOption = {
     category: string;
@@ -86,6 +87,17 @@ export default function PelaporanExcelTablePanel({
     const [draftHeaderGroups, setDraftHeaderGroups] = useState<string[]>([]);
     const [draftRows, setDraftRows] = useState<string[][]>([]);
     const queryClient = useQueryClient();
+
+    const { data: userSession } = useQuery({
+        queryKey: ["userSession"],
+        queryFn: async () => {
+            const res = await fetch("/api/auth/me");
+            if (!res.ok) return null;
+            return res.json();
+        }
+    });
+
+    const isAdmin = isAdminRole(userSession?.role);
 
     const isSourceControlled = typeof sourceName === "string" && typeof onSourceNameChange === "function";
     const selectedSourceName = isSourceControlled ? String(sourceName) : selectedSourceNameInternal;
@@ -449,14 +461,16 @@ export default function PelaporanExcelTablePanel({
 
                         <div className="d-flex flex-wrap gap-2 mb-3">
                             {!isEditMode ? (
-                                <button
-                                    type="button"
-                                    className="btn btn-sm btn-primary"
-                                    onClick={startEditMode}
-                                    disabled={!selectedSourceValue}
-                                >
-                                    Edit Tabel
-                                </button>
+                                isAdmin && (
+                                    <button
+                                        type="button"
+                                        className="btn btn-sm btn-primary"
+                                        onClick={startEditMode}
+                                        disabled={!selectedSourceValue}
+                                    >
+                                        Edit Tabel
+                                    </button>
+                                )
                             ) : (
                                 <>
                                     <button
