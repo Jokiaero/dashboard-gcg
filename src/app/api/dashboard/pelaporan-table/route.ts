@@ -19,6 +19,7 @@ const ALLOWED_PELAPORAN_CATEGORIES = [
   "pelaporan_penyuapan",
   "pelaporan_ppg",
   "pelaporan_survey",
+  "approval_kepatuhan",
 ] as const;
 
 type AllowedPelaporanCategory = (typeof ALLOWED_PELAPORAN_CATEGORIES)[number];

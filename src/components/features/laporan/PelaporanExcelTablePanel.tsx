@@ -35,7 +35,7 @@ type PelaporanTableApiResponse = {
 };
 
 type PelaporanExcelTablePanelProps = {
-    category: "pelaporan_wbs" | "pelaporan_risiko" | "pelaporan_penyuapan" | "pelaporan_ppg" | "pelaporan_survey";
+    category: "pelaporan_wbs" | "pelaporan_risiko" | "pelaporan_penyuapan" | "pelaporan_ppg" | "pelaporan_survey" | "approval_kepatuhan";
     title: string;
     sourceName?: string;
     onSourceNameChange?: (sourceName: string) => void;
@@ -445,29 +445,6 @@ export default function PelaporanExcelTablePanel({
                         </div>
 
                         <div className="d-flex flex-wrap gap-2 mb-3">
-                            <div
-                                className="w-100"
-                                style={{
-                                    border: "1px solid #dbeafe",
-                                    backgroundColor: "#f8fbff",
-                                    borderRadius: 8,
-                                    padding: "10px 12px",
-                                }}
-                            >
-                                <div className="d-flex flex-wrap justify-content-between align-items-center" style={{ gap: 8 }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, color: isEditMode ? "#1d4ed8" : "#334155" }}>
-                                        {isEditMode ? "Mode Edit Aktif" : "Mode Lihat"}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: "#475569" }}>
-                                        {displayColumnCount} kolom • {displayRowCount} baris
-                                    </div>
-                                </div>
-                                <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-                                    {useRawExcelOneToOneView
-                                        ? "Mode lihat mengikuti struktur Excel asli 1:1 (kolom, baris, dan merge)."
-                                        : "Edit dilakukan langsung di tabel dan tersimpan ke file Excel sumber."}
-                                </div>
-                            </div>
                         </div>
 
                         <div className="d-flex flex-wrap gap-2 mb-3">
