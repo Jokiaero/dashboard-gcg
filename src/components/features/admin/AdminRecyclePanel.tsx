@@ -56,6 +56,7 @@ export default function AdminRecyclePanel() {
     const [categoryFilter, setCategoryFilter] = useState<string>("all");
     const [keyword, setKeyword] = useState<string>("");
     const [confirmPermanentDelete, setConfirmPermanentDelete] = useState<DocFile | null>(null);
+    const [confirmDeleteAll, setConfirmDeleteAll] = useState<boolean>(false);
 
     const { data, isLoading, refetch } = useQuery<{ files: DocFile[] }>({
         queryKey: ["adminDocsRecycleGlobal", categoryFilter],
@@ -136,6 +137,25 @@ export default function AdminRecyclePanel() {
         },
     });
 
+    const deleteAllMutation = useMutation({
+        mutationFn: async () => {
+            const categoryParam = categoryFilter === "all" ? "all" : categoryFilter;
+            const res = await fetch("/api/admin/documents/delete-all", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ category: categoryParam }),
+            });
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || "Gagal menghapus semua file");
+            return json;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["adminDocsRecycleGlobal"] });
+            setConfirmDeleteAll(false);
+            refetch();
+        },
+    });
+
     return (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div
@@ -175,6 +195,25 @@ export default function AdminRecyclePanel() {
                     >
                         Muat Ulang
                     </button>
+                    {visibleFiles.length > 0 && (
+                        <button
+                            onClick={() => setConfirmDeleteAll(true)}
+                            disabled={deleteAllMutation.isPending}
+                            style={{
+                                border: "1px solid rgba(255,200,200,0.5)",
+                                backgroundColor: "rgba(239,68,68,0.2)",
+                                color: "#fff",
+                                borderRadius: 7,
+                                padding: "7px 14px",
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: "pointer",
+                                opacity: deleteAllMutation.isPending ? 0.7 : 1,
+                            }}
+                        >
+                            Hapus Semua
+                        </button>
+                    )}
                     <Link
                         href="/admin"
                         style={{
@@ -392,6 +431,42 @@ export default function AdminRecyclePanel() {
                                 style={{ flex: 1, padding: "9px 0", borderRadius: 7, border: "none", backgroundColor: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, opacity: permanentDeleteMutation.isPending ? 0.7 : 1 }}
                             >
                                 {permanentDeleteMutation.isPending ? "Menghapus..." : "Ya, Hapus Permanen"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {confirmDeleteAll && (
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        backgroundColor: "rgba(0,0,0,0.5)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 9999,
+                    }}
+                >
+                    <div style={{ backgroundColor: "#fff", borderRadius: 12, padding: 28, maxWidth: 420, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>Hapus Semua File?</div>
+                        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>
+                            Anda akan menghapus <strong style={{ color: "#dc2626" }}>{visibleFiles.length} file</strong> secara permanen dari recycle{categoryFilter !== "all" && ` pada kategori ${getCategoryLabel(categoryFilter)}`}. Tindakan ini tidak dapat dibatalkan. File fisik juga akan dihapus dari server.
+                        </div>
+                        <div style={{ display: "flex", gap: 10 }}>
+                            <button
+                                onClick={() => setConfirmDeleteAll(false)}
+                                style={{ flex: 1, padding: "9px 0", borderRadius: 7, border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", color: "#475569", fontWeight: 600, cursor: "pointer", fontSize: 13 }}
+                            >
+                                Batal
+                            </button>
+                            <button
+                                onClick={() => deleteAllMutation.mutate()}
+                                disabled={deleteAllMutation.isPending}
+                                style={{ flex: 1, padding: "9px 0", borderRadius: 7, border: "none", backgroundColor: "#dc2626", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, opacity: deleteAllMutation.isPending ? 0.7 : 1 }}
+                            >
+                                {deleteAllMutation.isPending ? "Menghapus..." : "Ya, Hapus Semua"}
                             </button>
                         </div>
                     </div>

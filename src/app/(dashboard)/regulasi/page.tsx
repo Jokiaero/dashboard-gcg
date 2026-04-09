@@ -134,7 +134,7 @@ export default function RegulasiCatalogPage() {
                             Katalog Regulasi
                         </h3>
                         <p className="text-muted mb-0" style={{ fontSize: "0.86rem" }}>
-                            Pilih cover dokumen untuk membuka regulasi. Upload dokumen hanya tersedia di Panel Admin.
+                            Pilih cover dokumen untuk membuka regulasi.
                         </p>
                     </div>
                 </div>

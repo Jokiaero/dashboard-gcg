@@ -83,7 +83,7 @@ export default function PenghargaanEntry() {
                             Katalog Berita GCG
                         </h3>
                         <p className="text-muted mb-0" style={{ fontSize: "0.86rem" }}>
-                            Klik cover dokumen untuk membuka file. Upload dokumen hanya tersedia di Panel Admin.
+                            Klik cover dokumen untuk membuka file.
                         </p>
                     </div>
                 </div>
