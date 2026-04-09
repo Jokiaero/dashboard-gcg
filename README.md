@@ -57,19 +57,19 @@ Sesuai dengan database model, sistem ini memiliki 3 level role:
 ### 2.1 Use Case Diagram
 
 ```mermaid
-usecaseDiagram
-    actor "User Biasa / VIP" as User
-    actor "Administrator" as Admin
+flowchart LR
+    User(["User Biasa / VIP"])
+    Admin(["Administrator"])
 
-    package "Dashboard GCG System" {
-        usecase "Login ke Dashboard" as UC1
-        usecase "Melihat Laporan GCG" as UC2
-        usecase "Mengunduh Dokumen" as UC3
-        usecase "Upload & Kelola Dokumen" as UC4
-        usecase "Import Data Excel" as UC5
-        usecase "Management Sinkronisasi DB" as UC6
-        usecase "Lihat Audit Logs" as UC7
-    }
+    subgraph System ["Dashboard GCG System"]
+        UC1("Login ke Dashboard")
+        UC2("Melihat Laporan GCG")
+        UC3("Mengunduh Dokumen")
+        UC4("Upload & Kelola Dokumen")
+        UC5("Import Data Excel")
+        UC6("Management Sinkronisasi DB")
+        UC7("Lihat Audit Logs")
+    end
 
     User --> UC1
     User --> UC2
