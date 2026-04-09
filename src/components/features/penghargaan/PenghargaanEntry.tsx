@@ -104,9 +104,9 @@ export default function PenghargaanEntry() {
                     </div>
                 )}
 
-                <div className="row g-3 g-xl-4">
+                <div className="row g-2 g-lg-3">
                     {beritaEntries.map((item) => (
-                        <div className="col-12 col-md-6 col-xl-4" key={item.fileName}>
+                        <div className="col-12 col-md-6 col-lg-4 col-xl-3" key={item.fileName}>
                             <a
                                 href={item.openHref}
                                 target="_blank"
@@ -176,11 +176,11 @@ export default function PenghargaanEntry() {
                                         </div>
                                     </div>
 
-                                    <div className="text-center" style={{ padding: "12px 8px 0" }}>
+                                    <div className="text-center" style={{ padding: "8px 4px 0" }}>
                                         <p
                                             style={{
                                                 margin: 0,
-                                                fontSize: 18,
+                                                fontSize: 14,
                                                 lineHeight: 1.15,
                                                 color: "#111827",
                                                 fontWeight: 500,
@@ -188,7 +188,7 @@ export default function PenghargaanEntry() {
                                         >
                                             {item.title}
                                         </p>
-                                        <p style={{ margin: "6px 0 0", fontSize: 12, lineHeight: 1.4, color: "#6b7280" }}>
+                                        <p style={{ margin: "4px 0 0", fontSize: 11, lineHeight: 1.3, color: "#6b7280" }}>
                                             {item.subtitle}
                                         </p>
                                     </div>
